@@ -5,6 +5,16 @@ Công cụ sinh test case tự động giúp AI Product Researcher đánh giá c
 ## Kiến trúc
 
 ```
+┌─────────────┐     REST API      ┌──────────────────┐
+│  Frontend   │ ◄──────────────► │  FastAPI Backend  │
+│  (React/...) │                   │                  │
+└─────────────┘                   │  src/pipeline/   │
+                                  │  src/llm/        │
+                                  │  src/ingestion/  │
+                                  └──────────────────┘
+```
+
+```
 Raw Data → Intent Extraction → Persona Generation → Test Prompt Generation → Export
               (Bước 1)              (Bước 2)              (Bước 3)
            [review/edit]         [review/edit]          [review/edit]
@@ -15,36 +25,81 @@ Raw Data → Intent Extraction → Persona Generation → Test Prompt Generation
 ## Cấu trúc thư mục
 
 ```
-app.py                          # Entry point Streamlit — toàn bộ UI flow 4 bước
-requirements.txt
-.env.example                    # Template API keys
+backend/
+├── main.py                      # FastAPI entry point
+├── requirements.txt
+├── pytest.ini
+├── src/
+│   ├── config.py                # Settings (API keys, chunking config) — đọc từ .env
+│   ├── models/
+│   │   └── schemas.py           # Pydantic models: Intent, Persona, TestCasePrompt, RawInput, PipelineState
+│   ├── api/
+│   │   ├── deps.py              # In-memory PipelineState singleton + reset
+│   │   └── routers/
+│   │       ├── input.py         # POST /api/input/text, /api/input/csv
+│   │       ├── intents.py       # CRUD + extract + approve + regenerate
+│   │       ├── personas.py      # CRUD + generate + approve + regenerate
+│   │       ├── prompts.py       # CRUD + generate + regenerate
+│   │       ├── export.py        # GET /api/export/csv, /api/export/markdown
+│   │       └── state.py         # GET /api/state, POST /api/state/reset
+│   ├── ingestion/
+│   │   ├── base.py              # Abstract DataIngestion — interface mở rộng cho crawl/form
+│   │   ├── csv_loader.py        # Đọc CSV, gộp cột text thành raw content
+│   │   └── text_loader.py       # Nhận text paste trực tiếp
+│   ├── llm/
+│   │   ├── base.py              # Abstract LLMClient — generate() và generate_structured()
+│   │   ├── gemini_client.py     # Google Gemini 1.5 Pro
+│   │   ├── openai_client.py     # OpenAI GPT-4o
+│   │   └── factory.py           # create_llm_client(model, api_key) → chọn implementation
+│   ├── pipeline/
+│   │   ├── intent_extractor.py  # Bước 1: Chunk text → gọi LLM → parse JSON → list[Intent]
+│   │   ├── persona_generator.py # Bước 2: Intent → 2 Persona (easy + hard)
+│   │   └── test_prompt_generator.py # Bước 3: Intent+Persona → Test Prompt
+│   ├── prompts/
+│   │   └── templates.py         # System/User prompt templates cho 3 bước pipeline
+│   ├── chunking/
+│   │   └── text_chunker.py      # Chia text dài theo sentence boundary, có overlap
+│   └── export/
+│       └── exporter.py          # Export to_csv() / to_markdown()
+└── tests/                       # 19 unit tests
 
-src/
-├── config.py                   # Settings (API keys, chunking config) — đọc từ .env
-├── models/
-│   └── schemas.py              # Pydantic models: Intent, Persona, TestCasePrompt, RawInput, PipelineState
-├── ingestion/
-│   ├── base.py                 # Abstract DataIngestion — interface mở rộng cho crawl/form sau này
-│   ├── csv_loader.py           # Đọc CSV, gộp cột text thành raw content
-│   └── text_loader.py          # Nhận text paste trực tiếp
-├── llm/
-│   ├── base.py                 # Abstract LLMClient — generate() và generate_structured()
-│   ├── gemini_client.py        # Google Gemini 1.5 Pro (context window lớn, phù hợp text dài)
-│   ├── openai_client.py        # OpenAI GPT-4o
-│   └── factory.py              # create_llm_client(model, api_key) → chọn implementation
-├── pipeline/
-│   ├── intent_extractor.py     # Bước 1: Chunk text → gọi LLM → parse JSON → list[Intent]
-│   ├── persona_generator.py    # Bước 2: Với mỗi Intent → gọi LLM → 2 Persona (easy + hard)
-│   └── test_prompt_generator.py# Bước 3: Intent + Persona → gọi LLM → Test Prompt đóng vai
-├── prompts/
-│   └── templates.py            # System/User prompt templates cho 3 bước pipeline
-├── chunking/
-│   └── text_chunker.py         # Chia text dài theo sentence boundary, có overlap
-└── export/
-    └── exporter.py             # Export to_csv() / to_markdown() — grouped by Intent → Persona
+frontend/                        # Frontend code (tự gen)
+├── src/
+│   ├── api/                     # API client gọi backend
+│   ├── components/              # Reusable UI components
+│   └── pages/                   # Các trang theo bước pipeline
+└── README.md                    # API endpoints reference
 
-tests/                          # 19 unit tests (schemas, loaders, chunker, pipeline parse, export)
+requirements.txt                 # Root-level dependencies
+.env.example                     # Template API keys
 ```
+
+## API Endpoints
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| POST | `/api/input/text` | Paste text đầu vào |
+| POST | `/api/input/csv` | Upload CSV đầu vào |
+| POST | `/api/intents/extract` | Chạy LLM sinh Intent |
+| GET | `/api/intents` | Lấy danh sách Intent |
+| PUT | `/api/intents` | Cập nhật Intent (edit/delete) |
+| POST | `/api/intents/approve` | Chốt Intent → chuyển bước 2 |
+| POST | `/api/intents/regenerate` | Regenerate Intent + guidance |
+| POST | `/api/personas/generate` | Chạy LLM sinh Persona |
+| GET | `/api/personas` | Lấy danh sách Persona |
+| PUT | `/api/personas` | Cập nhật Persona |
+| POST | `/api/personas/approve` | Chốt Persona → chuyển bước 3 |
+| POST | `/api/personas/regenerate` | Regenerate Persona + guidance |
+| POST | `/api/prompts/generate` | Chạy LLM sinh Test Prompt |
+| GET | `/api/prompts` | Lấy danh sách Test Prompt |
+| PUT | `/api/prompts` | Cập nhật Test Prompt |
+| POST | `/api/prompts/regenerate` | Regenerate Test Prompt + guidance |
+| GET | `/api/export/csv` | Export CSV |
+| GET | `/api/export/markdown` | Export Markdown |
+| GET | `/api/state` | Lấy trạng thái pipeline hiện tại |
+| POST | `/api/state/reset` | Reset toàn bộ pipeline |
+
+API docs tự động: `http://localhost:8000/docs` (Swagger UI)
 
 ## Data Models
 
@@ -74,7 +129,7 @@ tests/                          # 19 unit tests (schemas, loaders, chunker, pipe
 - **Process:** Với mỗi Persona, gọi LLM viết prompt đóng vai, phản ánh đúng context/goal và tính cách persona
 - **Output:** `list[TestCasePrompt]`
 
-Mỗi bước có **Regenerate** với guidance text từ user, và **editable table** (`st.data_editor`) để sửa/xóa/thêm trước khi chốt.
+Mỗi bước có **Regenerate** với guidance text từ user, và **editable table** để sửa/xóa/thêm trước khi chốt.
 
 ## LLM Abstraction
 
@@ -111,16 +166,12 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux/Mac
 
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 cp .env.example .env            # Điền API keys
 
-streamlit run app.py
+# Chạy backend
+cd backend
+uvicorn main:app --reload --port 8000
+
+# Frontend — xem frontend/README.md
 ```
-
-## UI Flow (Streamlit)
-
-1. **Sidebar:** Chọn model (Gemini/OpenAI) + nhập API Key
-2. **Bước 0:** Upload CSV hoặc paste text → "Phân tích Intent"
-3. **Bước 1:** Bảng Intent editable → sửa/xóa/regenerate → "Chốt Intent → Sinh Persona"
-4. **Bước 2:** Bảng Persona editable → sửa/xóa/regenerate → "Chốt Persona → Sinh Test Prompt"
-5. **Bước 3:** Bảng Test Prompt editable → Export CSV hoặc Markdown
