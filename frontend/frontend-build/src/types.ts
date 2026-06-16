@@ -6,6 +6,9 @@ export interface Intent {
   goal: string;
   evidence: string[];
   status: 'generated' | 'edited' | 'approved' | 'deleted';
+  // UI-only fields (not persisted by the backend)
+  phase?: string;
+  utterance?: string;
 }
 
 export interface Persona {
@@ -15,6 +18,22 @@ export interface Persona {
   description: string;
   trait_type: 'easy' | 'hard';
   status: 'generated' | 'edited' | 'approved' | 'deleted';
+  // UI-only rich fields (mock, not persisted by the backend).
+  // Each persona is generated from a single sub-intent.
+  sub_intent_id?: string;
+  sub_intent_num?: number;
+  sub_intent_name?: string;
+  persona_num?: number;
+  persona_type?: string;
+  user_profile?: string;
+  estimated_user_ratio?: string;
+  usage_frequency?: string;
+  reason_to_use?: string;
+  sample_start_query?: string;
+  special_situation?: string;
+  why_this_persona_is_different?: string;
+  expected_behavior_or_need?: string;
+  not_needed?: string;
 }
 
 export interface TestCasePrompt {
@@ -22,6 +41,15 @@ export interface TestCasePrompt {
   persona_id: string;
   intent_id: string;
   prompt_text: string;
+  status: 'generated' | 'edited' | 'approved' | 'deleted';
+}
+
+// ─── UI-only (mock, no backend) ───────────────────────────────────────────────
+export interface SubIntent {
+  id: string;
+  intent_id: string;
+  title: string;
+  description: string;
   status: 'generated' | 'edited' | 'approved' | 'deleted';
 }
 

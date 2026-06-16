@@ -14,45 +14,69 @@ interface Props {
 export default function IntentCurationTab({ intents, setIntents, showToast, onApproved, apiKey, aiModel }: Props) {
   const [search, setSearch] = useState('');
   const [regenerating, setRegenerating] = useState(false);
-  const [approving, setApproving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [guidance, setGuidance] = useState('');
   const [showGuidance, setShowGuidance] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const visible = intents.filter((i) => i.status !== 'deleted').filter((i) => {
     const t = search.toLowerCase();
-    return i.context.toLowerCase().includes(t) || i.goal.toLowerCase().includes(t);
+    return (i.context ?? '').toLowerCase().includes(t) || (i.goal ?? '').toLowerCase().includes(t);
   });
 
+  const allSelected = visible.length > 0 && visible.every((i) => selected.has(i.id));
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(visible.map((i) => i.id)));
+  };
+
+  // Persisted edits (synced to backend).
   const updateIntent = (id: string, patch: Partial<Intent>) => {
     const updated = intents.map((i) => i.id === id ? { ...i, ...patch, status: 'edited' as const } : i);
     setIntents(updated);
     api.updateIntents([{ id, ...patch }]).catch(() => {});
   };
 
+  // UI-only edits (phase / utterance) — not sent to the backend.
+  const updateIntentLocal = (id: string, patch: Partial<Intent>) => {
+    setIntents(intents.map((i) => i.id === id ? { ...i, ...patch, status: 'edited' as const } : i));
+  };
+
   const deleteIntent = (id: string) => {
     const updated = intents.map((i) => i.id === id ? { ...i, status: 'deleted' as const } : i);
     setIntents(updated);
+    setSelected((prev) => { const next = new Set(prev); next.delete(id); return next; });
     api.updateIntents([{ id, status: 'deleted' }]).catch(() => {});
   };
 
   const addIntent = () => {
     const newIntent: Intent = {
       id: `custom-${Date.now()}`,
-      context: 'Bối cảnh mới',
-      goal: 'Mục tiêu mới',
+      context: 'New trigger moment',
+      goal: 'New intent',
       evidence: [],
+      phase: '',
+      utterance: '',
       status: 'edited',
     };
     setIntents([newIntent, ...intents]);
   };
 
   const handleRegenerate = async () => {
-    if (!apiKey) { showToast('Cần nhập API key.', 'error'); return; }
+    if (!apiKey) { showToast('API key is required.', 'error'); return; }
     setRegenerating(true);
     try {
       const result = await api.regenerateIntents(aiModel, apiKey, guidance);
       setIntents(result);
-      showToast('Đã regenerate Intent thành công!', 'success');
+      showToast('Intents regenerated successfully!', 'success');
       setShowGuidance(false);
       setGuidance('');
     } catch (e: any) {
@@ -62,57 +86,47 @@ export default function IntentCurationTab({ intents, setIntents, showToast, onAp
     }
   };
 
-  const handleApprove = async () => {
-    setApproving(true);
+  const handleGenerateSubIntents = async () => {
+    if (selected.size === 0) { showToast('Select at least one intent to generate sub-intents.', 'error'); return; }
+    setGenerating(true);
     try {
-      // Push edits first
-      const patches = intents.filter(i => i.status === 'edited').map(i => ({
-        id: i.id, context: i.context, goal: i.goal, status: i.status,
-      }));
+      // Push edits for the selected intents before moving on.
+      const patches = intents
+        .filter(i => selected.has(i.id) && i.status === 'edited')
+        .map(i => ({ id: i.id, context: i.context, goal: i.goal, status: i.status }));
       if (patches.length) await api.updateIntents(patches);
-      await api.approveIntents();
-      const fresh = await api.getIntents();
-      setIntents(fresh);
-      showToast(`${fresh.filter((i: Intent) => i.status === 'approved').length} Intent đã được chốt!`, 'success');
+      showToast(`Generating sub-intents for ${selected.size} intent(s)...`, 'info');
       onApproved();
     } catch (e: any) {
       showToast(e.message, 'error');
     } finally {
-      setApproving(false);
+      setGenerating(false);
     }
   };
 
-  const getTraitBadge = (i: number) => {
-    const colors = [
-      'bg-[#ff4d00]/20 text-[#ff4d00] border-[#ff4d00]/30',
-      'bg-blue-950/40 text-blue-400 border-blue-900/30',
-      'bg-emerald-950/40 text-emerald-400 border-emerald-900/30',
-      'bg-fuchsia-950/40 text-fuchsia-400 border-fuchsia-900/30',
-      'bg-rose-950/40 text-rose-400 border-rose-900/30',
-    ];
-    return colors[i % colors.length];
-  };
-
   return (
-    <div className="max-w-[1400px] mx-auto bg-[#161616] border border-white/15 overflow-hidden flex flex-col h-[calc(100vh-280px)] rounded-none">
-      
+    <div className="max-w-[1400px] mx-auto bg-white border border-black/10 overflow-hidden flex flex-col h-[calc(100vh-280px)] rounded-none">
+
       {/* Toolbar */}
-      <div className="px-6 py-4 border-b border-white/15 flex items-center justify-between bg-black/20 gap-4 select-none">
+      <div className="px-6 py-4 border-b border-black/10 flex items-center justify-between bg-stone-50 gap-4 select-none">
         <div className="flex items-center gap-4">
-          <h2 className="text-[13px] font-bold text-white uppercase tracking-[0.2em]">Intent Review</h2>
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 text-[18px]">search</span>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm intent..."
-              className="pl-9 pr-4 py-1.5 bg-black/40 border border-white/10 text-[12px] w-56 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none rounded-none text-white placeholder-stone-600"
-            />
+          <div>
+            <h2 className="text-[13px] font-bold text-stone-900 uppercase tracking-[0.2em]">2 · Intent Discovery</h2>
+            <p className="text-[11px] text-stone-500 font-serif italic mt-0.5">Review, edit and tick the intents you want to generate sub-intents for.</p>
           </div>
+          {/* <div className="relative">
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-[18px]">search</span>
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search intents..."
+              className="pl-9 pr-4 py-1.5 bg-stone-50 border border-black/10 text-[12px] w-56 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none rounded-none text-stone-900 placeholder-stone-400"
+            />
+          </div> */}
         </div>
 
         <div className="flex items-center gap-2">
           {/* Regenerate */}
           <button onClick={() => setShowGuidance(!showGuidance)}
-            className="flex items-center gap-2 px-4 py-2 text-stone-300 border border-white/15 hover:border-white/30 hover:text-white text-[11px] uppercase tracking-wider font-bold transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 text-stone-600 border border-black/10 hover:border-black/20 hover:text-stone-900 text-[11px] uppercase tracking-wider font-bold transition-all cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">refresh</span>
             Regenerate
@@ -123,17 +137,17 @@ export default function IntentCurationTab({ intents, setIntents, showToast, onAp
             className="flex items-center gap-2 px-4 py-2 text-[#ff4d00] border border-[#ff4d00]/50 hover:bg-[#ff4d00]/10 text-[11px] uppercase tracking-wider font-bold transition-all cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">add</span>
-            Thêm
+            Add
           </button>
 
-          {/* Approve */}
-          <button onClick={handleApprove} disabled={approving || visible.length === 0}
+          {/* Generate sub-intents */}
+          <button onClick={handleGenerateSubIntents} disabled={generating || selected.size === 0}
             className="flex items-center gap-2 px-6 py-2 bg-[#ff4d00] text-white text-[11px] uppercase tracking-wider font-bold hover:opacity-95 transition-all disabled:opacity-40 cursor-pointer"
           >
-            {approving ? (
-              <><span className="material-symbols-outlined animate-spin text-[16px]">sync</span>Đang chốt...</>
+            {generating ? (
+              <><span className="material-symbols-outlined animate-spin text-[16px]">sync</span>Generating...</>
             ) : (
-              <><span className="material-symbols-outlined text-[16px]">check_circle</span>Chốt Intent → Bước 2</>
+              <><span className="material-symbols-outlined text-[16px]">auto_awesome</span>Generate sub-intent</>
             )}
           </button>
         </div>
@@ -147,14 +161,14 @@ export default function IntentCurationTab({ intents, setIntents, showToast, onAp
             type="text"
             value={guidance}
             onChange={(e) => setGuidance(e.target.value)}
-            placeholder="Hướng dẫn thêm cho AI (VD: Tập trung vào intent liên quan đến đặt lịch học)"
-            className="flex-grow bg-black/40 border border-white/10 text-[12px] px-3 py-2 text-white outline-none focus:ring-1 focus:ring-[#ff4d00] font-mono placeholder-stone-600"
+            placeholder="Additional guidance for the AI (e.g. focus on intents related to scheduling study sessions)"
+            className="flex-grow bg-stone-50 border border-black/10 text-[12px] px-3 py-2 text-stone-900 outline-none focus:ring-1 focus:ring-[#ff4d00] font-mono placeholder-stone-400"
           />
           <button onClick={handleRegenerate} disabled={regenerating}
             className="px-5 py-2 bg-[#ff4d00] text-white text-[11px] font-bold uppercase tracking-wider hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2"
           >
             {regenerating ? <span className="material-symbols-outlined animate-spin text-[16px]">sync</span> : <span className="material-symbols-outlined text-[16px]">send</span>}
-            Chạy
+            Run
           </button>
         </div>
       )}
@@ -162,63 +176,88 @@ export default function IntentCurationTab({ intents, setIntents, showToast, onAp
       {/* Table */}
       <div className="flex-grow overflow-auto custom-scrollbar">
         <table className="w-full text-left border-collapse">
-          <thead className="sticky top-0 bg-[#0d0d0d] z-10">
-            <tr className="border-b border-white/15 text-stone-400 font-bold text-[10px] uppercase tracking-wider">
-              <th className="px-4 py-3 w-8 font-mono text-center">#</th>
-              <th className="px-4 py-3 w-[280px]">Context (Bối cảnh)</th>
-              <th className="px-4 py-3">Goal (Mục tiêu)</th>
-              <th className="px-4 py-3 w-20 text-center">Status</th>
+          <thead className="sticky top-0 bg-stone-100 z-10">
+            <tr className="border-b border-black/10 text-stone-500 font-bold text-[10px] uppercase tracking-wider">
+              <th className="px-4 py-3 w-10 text-center">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="w-3.5 h-3.5 accent-[#ff4d00] cursor-pointer align-middle"
+                />
+              </th>
+              <th className="px-4 py-3 w-[240px]">Intent Name</th>
+              <th className="px-4 py-3 w-32">Phase</th>
+              <th className="px-4 py-3">Utterance</th>
+              <th className="px-4 py-3 w-[280px]">Trigger Moment</th>
               <th className="px-4 py-3 w-12"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5 text-stone-200">
+          <tbody className="divide-y divide-black/5 text-stone-800">
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-16 text-stone-500 text-xs font-serif italic">
-                  Chưa có intent. Quay lại Bước 1 để chạy Intent Discovery.
+                <td colSpan={6} className="text-center py-16 text-stone-400 text-xs font-serif italic">
+                  No intents yet. Go back to Step 1 to run Intent Discovery.
                 </td>
               </tr>
             ) : (
-              visible.map((item, idx) => (
-                <tr key={item.id} className="group hover:bg-white/[0.02] transition-colors">
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-block w-6 h-6 text-[9px] font-bold font-mono flex items-center justify-center border ${getTraitBadge(idx)}`}>
-                      {idx + 1}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-2">
-                    <textarea
-                      value={item.context}
-                      onChange={(e) => updateIntent(item.id, { context: e.target.value })}
-                      rows={2}
-                      className="bg-transparent border-none p-0 text-[12.5px] text-white w-full focus:ring-0 focus:outline-none resize-none leading-relaxed focus:border-b focus:border-[#ff4d00]/50"
+              visible.map((item) => (
+                <tr key={item.id} className="group hover:bg-stone-50 transition-colors">
+                  <td className="px-4 py-3 text-center align-middle">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item.id)}
+                      onChange={() => toggleSelect(item.id)}
+                      className="w-3.5 h-3.5 accent-[#ff4d00] cursor-pointer align-middle"
                     />
                   </td>
 
+                  {/* Intent Name */}
                   <td className="px-4 py-2">
                     <textarea
-                      value={item.goal}
+                      value={item.goal ?? ''}
                       onChange={(e) => updateIntent(item.id, { goal: e.target.value })}
                       rows={2}
-                      className="bg-transparent border-none p-0 text-[12.5px] text-stone-300 italic font-serif w-full focus:ring-0 focus:outline-none resize-none leading-relaxed"
+                      className="bg-transparent border-none p-0 text-[12.5px] text-stone-900 font-bold w-full focus:ring-0 focus:outline-none resize-none leading-relaxed focus:border-b focus:border-[#ff4d00]/50"
                     />
                   </td>
 
-                  <td className="px-4 py-3 text-center">
-                    <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 border ${
-                      item.status === 'approved' ? 'text-emerald-400 border-emerald-800 bg-emerald-950/30' :
-                      item.status === 'edited' ? 'text-yellow-400 border-yellow-800 bg-yellow-950/30' :
-                      'text-stone-400 border-stone-700 bg-stone-800/50'
-                    }`}>
-                      {item.status}
-                    </span>
+                  {/* Phase */}
+                  <td className="px-4 py-2 align-middle">
+                    <input
+                      type="text"
+                      value={item.phase ?? ''}
+                      onChange={(e) => updateIntentLocal(item.id, { phase: e.target.value })}
+                      placeholder="—"
+                      className="bg-transparent border-none p-0 text-[12.5px] text-stone-700 w-full focus:ring-0 focus:outline-none placeholder-stone-300"
+                    />
                   </td>
 
-                  <td className="px-4 py-3 text-right">
+                  {/* Utterance */}
+                  <td className="px-4 py-2 align-middle">
+                    <textarea
+                      value={item.utterance ?? item.evidence?.[0] ?? ''}
+                      onChange={(e) => updateIntentLocal(item.id, { utterance: e.target.value })}
+                      rows={2}
+                      placeholder="—"
+                      className="bg-transparent border-none p-0 text-[12.5px] text-stone-600 italic font-serif w-full focus:ring-0 focus:outline-none resize-none leading-relaxed placeholder-stone-300"
+                    />
+                  </td>
+
+                  {/* Trigger Moment */}
+                  <td className="px-4 py-2 align-middle">
+                    <textarea
+                      value={item.context ?? ''}
+                      onChange={(e) => updateIntent(item.id, { context: e.target.value })}
+                      rows={2}
+                      className="bg-transparent border-none p-0 text-[12.5px] text-stone-900 w-full focus:ring-0 focus:outline-none resize-none leading-relaxed focus:border-b focus:border-[#ff4d00]/50"
+                    />
+                  </td>
+
+                  <td className="px-4 py-3 text-right align-middle">
                     <button onClick={() => deleteIntent(item.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-rose-950/50 text-stone-500 hover:text-rose-400 cursor-pointer"
-                      title="Xóa intent"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-rose-50 text-stone-400 hover:text-rose-500 cursor-pointer"
+                      title="Delete intent"
                     >
                       <span className="material-symbols-outlined text-[18px]">delete</span>
                     </button>
@@ -231,12 +270,12 @@ export default function IntentCurationTab({ intents, setIntents, showToast, onAp
       </div>
 
       {/* Footer */}
-      <div className="px-6 py-3 border-t border-white/15 flex items-center justify-between bg-black/20 select-none">
-        <span className="text-[12px] text-stone-400 font-serif italic">
-          {visible.length} intents · {intents.filter(i => i.status === 'approved').length} đã chốt
+      <div className="px-6 py-3 border-t border-black/10 flex items-center justify-between bg-stone-50 select-none">
+        <span className="text-[12px] text-stone-500 font-serif italic">
+          {visible.length} intents · {selected.size} selected
         </span>
-        <span className="text-[10px] text-stone-600 font-mono uppercase tracking-widest">
-          Bấm vào ô để chỉnh sửa trực tiếp
+        <span className="text-[10px] text-stone-400 font-mono uppercase tracking-widest">
+          Click a cell to edit inline
         </span>
       </div>
     </div>

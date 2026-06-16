@@ -4,10 +4,13 @@ import Header from './components/Header';
 import StepIndicator from './components/StepIndicator';
 import DataIngestionTab from './components/DataIngestionTab';
 import IntentCurationTab from './components/IntentCurationTab';
+import SubIntentTab from './components/SubIntentTab';
 import PersonaPlaygroundTab from './components/PersonaPlaygroundTab';
 import ExportTab from './components/ExportTab';
+import SingleTurnTab from './components/SingleTurnTab';
+import DashboardTab from './components/DashboardTab';
 import RubricModal from './components/RubricModal';
-import { Intent, Persona, TestCasePrompt, Toast } from './types';
+import { Intent, SubIntent, Persona, TestCasePrompt, Toast } from './types';
 import * as api from './api/client';
 
 export default function App() {
@@ -15,6 +18,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [aiModel, setAiModel] = useState('gemini');
   const [intents, setIntents] = useState<Intent[]>([]);
+  const [subIntents, setSubIntents] = useState<SubIntent[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [prompts, setPrompts] = useState<TestCasePrompt[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -37,22 +41,20 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // After intents approved → move to step 3 + generate personas
-  const handleIntentsApproved = async () => {
+  // After intents approved → move to step 3 (Sub-Intent, mock)
+  const handleIntentsApproved = () => {
     setCurrentStep(3);
-    try {
-      showToast('Đang gen Persona...', 'info');
-      const result = await api.generatePersonas(aiModel, apiKey);
-      setPersonas(result);
-      showToast(`Đã gen ${result.length} persona!`, 'success');
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    }
   };
 
-  // After personas approved → move to step 4 + generate prompts
-  const handlePersonasApproved = async () => {
+  // After sub-intents approved → move to step 4 (personas are generated in the tab,
+  // one per sub-intent).
+  const handleSubIntentsApproved = () => {
     setCurrentStep(4);
+  };
+
+  // After personas approved → move to step 5 + generate prompts
+  const handlePersonasApproved = async () => {
+    setCurrentStep(5);
     try {
       showToast('Đang gen Test Prompt...', 'info');
       const result = await api.generatePrompts(aiModel, apiKey);
@@ -67,6 +69,7 @@ export default function App() {
     if (!confirm('Reset toàn bộ pipeline? Mọi dữ liệu sẽ bị xóa.')) return;
     await api.resetState().catch(() => {});
     setIntents([]);
+    setSubIntents([]);
     setPersonas([]);
     setPrompts([]);
     setCurrentStep(1);
@@ -74,7 +77,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] text-[#e5e5e5] flex font-sans select-none">
+    <div className="min-h-screen bg-[#f7f7f5] text-stone-900 flex font-sans select-none">
       
       <Sidebar
         apiKey={apiKey}
@@ -95,8 +98,8 @@ export default function App() {
           <div className="fixed top-20 right-8 z-50">
             <div className={`px-5 py-3 shadow-xl flex items-center gap-2.5 text-[10px] font-mono uppercase tracking-widest border ${
               toast.type === 'success' ? 'bg-[#ff4d00] text-white border-[#ff4d00]' :
-              toast.type === 'error' ? 'bg-rose-950 text-rose-200 border-rose-900' :
-              'bg-stone-900 text-stone-200 border-white/15'
+              toast.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+              'bg-white text-stone-700 border-black/10'
             }`}>
               <span className="material-symbols-outlined text-[16px]">
                 {toast.type === 'success' ? 'check_circle' : toast.type === 'error' ? 'error' : 'info'}
@@ -107,7 +110,7 @@ export default function App() {
         )}
 
         <div className="flex-1 p-8">
-          <StepIndicator currentStep={currentStep} onStepChange={setCurrentStep} />
+          {currentStep <= 5 && <StepIndicator currentStep={currentStep} onStepChange={setCurrentStep} />}
 
           <main className="mt-2">
             {currentStep === 1 && (
@@ -129,16 +132,27 @@ export default function App() {
               />
             )}
             {currentStep === 3 && (
+              <SubIntentTab
+                intents={intents}
+                subIntents={subIntents}
+                setSubIntents={setSubIntents}
+                showToast={showToast}
+                onApproved={handleSubIntentsApproved}
+              />
+            )}
+            {currentStep === 4 && (
               <PersonaPlaygroundTab
                 personas={personas}
                 setPersonas={setPersonas}
+                intents={intents}
+                subIntents={subIntents}
                 showToast={showToast}
                 onApproved={handlePersonasApproved}
                 apiKey={apiKey}
                 aiModel={aiModel}
               />
             )}
-            {currentStep === 4 && (
+            {currentStep === 5 && (
               <ExportTab
                 prompts={prompts}
                 setPrompts={setPrompts}
@@ -150,11 +164,30 @@ export default function App() {
                 aiModel={aiModel}
               />
             )}
+            {currentStep === 6 && (
+              <SingleTurnTab
+                prompts={prompts}
+                setPrompts={setPrompts}
+                intents={intents}
+                personas={personas}
+                showToast={showToast}
+                apiKey={apiKey}
+                aiModel={aiModel}
+              />
+            )}
+            {currentStep === 7 && (
+              <DashboardTab
+                intents={intents}
+                subIntents={subIntents}
+                personas={personas}
+                prompts={prompts}
+              />
+            )}
           </main>
 
           {/* Footer */}
           <div className="max-w-6xl mx-auto mt-8 flex justify-between items-center select-none opacity-60 hover:opacity-100 transition-opacity">
-            <p className="text-[10px] text-stone-500 uppercase tracking-widest font-mono">
+            <p className="text-[10px] text-stone-400 uppercase tracking-widest font-mono">
               AI-Eval · ui-khanh · FastAPI backend @ localhost:8000
             </p>
             <button
