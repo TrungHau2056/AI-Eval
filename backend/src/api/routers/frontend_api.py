@@ -38,6 +38,7 @@ class DiscoverRequest(BaseModel):
 class GeneratePersonasRequest(BaseModel):
     intents: list[dict] = []
     ruleText: str = ""
+    feedback: str = ""
 
 
 class GenerateTestCasesRequest(BaseModel):
@@ -151,6 +152,7 @@ def _map_pipeline_personas_to_fe(results: list[dict], fe_intent_name_to_id: dict
             trigger=r.get("trigger", ""),
             utterance=r.get("utterance", ""),
             frequency=freq,
+            frequencyText=str(freq_str) if freq_str else "",
             pain=r.get("pain", ""),
             reject=r.get("reject", ""),
             expectedAIBehavior=r.get("expected_behavior", r.get("ai_response_example", "")),
@@ -295,11 +297,16 @@ def generate_personas(req: GeneratePersonasRequest):
     agent = PersonaAgent(llm, memory=get_memory("persona"))
     if req.ruleText:
         agent.add_feedback(f"Generate personas: {req.ruleText}")
+    if req.feedback:
+        agent.add_feedback(f"User feedback: {req.feedback}")
 
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting PersonaAgent.run() ...")
-        results = loop.run_until_complete(agent.run(internal_intents, req.ruleText))
+        guidance = req.ruleText
+        if req.feedback:
+            guidance = f"{guidance}\n{req.feedback}" if guidance else req.feedback
+        results = loop.run_until_complete(agent.run(internal_intents, guidance))
         logger.info("PersonaAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("PersonaAgent.run() failed: %s", e, exc_info=True)

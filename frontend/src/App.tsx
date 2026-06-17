@@ -208,23 +208,30 @@ export default function App() {
     saveStateToServer({ personas: updatedList });
   };
 
-  const handleRegeneratePersona = async (id: string) => {
+  const handleRegeneratePersona = async (id: string, feedback?: string) => {
     const selectedIntents = intents.filter((i) => i.selected);
+    const target = personas.find((p) => p.id === id);
     try {
+      const body: Record<string, unknown> = { intents: selectedIntents, ruleText: personaRule };
+      if (feedback) body.feedback = feedback;
       const response = await fetch("/api/generate-personas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intents: selectedIntents, ruleText: personaRule }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
-      const updatedPersona = data.personas[0]; // grab top fresh instance
+      // Find the regenerated persona matching the same type
+      const matchType = target?.type || "happy";
+      const updatedPersona = data.personas.find((p: Persona) => p.type === matchType) || data.personas[0];
 
       if (updatedPersona) {
         handleUpdatePersona(id, {
           name: updatedPersona.name,
           trigger: updatedPersona.trigger,
           utterance: updatedPersona.utterance,
+          frequency: updatedPersona.frequency,
+          frequencyText: updatedPersona.frequencyText,
           pain: updatedPersona.pain,
           reject: updatedPersona.reject,
           expectedAIBehavior: updatedPersona.expectedAIBehavior,
@@ -234,7 +241,6 @@ export default function App() {
     } catch (e) {
       // Offline fallback
       showToast("Offline fallback: generated fresh mockup persona parameters.", "info");
-      const target = personas.find((p) => p.id === id);
       if (target) {
         handleUpdatePersona(id, {
           name: target.type === "happy" ? "Standard Corporate Persona" : "Security Inspector",

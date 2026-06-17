@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { Intent, Persona } from "../types";
+import AutoTextarea from "./AutoTextarea";
 
 interface PersonaPlaygroundTabProps {
   intents: Intent[];
   personas: Persona[];
   onUpdatePersona: (id: string, updated: Partial<Persona>) => void;
-  onRegeneratePersona: (id: string) => Promise<void>;
+  onRegeneratePersona: (id: string, feedback?: string) => Promise<void>;
   onConfirmPersonas: () => void;
   ruleText: string;
   onOpenRuleModal: () => void;
@@ -22,6 +23,8 @@ export default function PersonaPlaygroundTab({
 }: PersonaPlaygroundTabProps) {
   const [loadingMap, setLoadingMap] = useState<{ [id: string]: boolean }>({});
   const [compiling, setCompiling] = useState(false);
+  const [feedbackMap, setFeedbackMap] = useState<{ [id: string]: string }>({});
+  const [showFeedbackMap, setShowFeedbackMap] = useState<{ [id: string]: boolean }>({});
 
   const activeIntents = intents.filter((i) => i.selected);
   const displayIntents = activeIntents.length > 0 ? activeIntents : intents;
@@ -38,10 +41,11 @@ export default function PersonaPlaygroundTab({
 
   const selectedIntent = displayIntents.find((i) => i.id === selectedIntentId);
 
-  const handleRegen = async (id: string) => {
+  const handleRegen = async (id: string, feedback?: string) => {
     setLoadingMap((prev) => ({ ...prev, [id]: true }));
+    setShowFeedbackMap((prev) => ({ ...prev, [id]: false }));
     try {
-      await onRegeneratePersona(id);
+      await onRegeneratePersona(id, feedback);
     } catch (e) {
       console.error(e);
     } finally {
@@ -90,6 +94,9 @@ export default function PersonaPlaygroundTab({
       <span className="px-2 py-0.5 bg-stone-100 text-stone-600 border border-stone-200 text-[9px] font-bold rounded-none uppercase tracking-widest">Boundary Test</span>
     );
 
+    const showFeedback = showFeedbackMap[persona.id] || false;
+    const feedback = feedbackMap[persona.id] || "";
+
     return (
       <div className={`bg-white border border-stone-200 border-t-4 ${borderColor} rounded-none shadow-sm flex flex-col overflow-hidden transition-all`}>
         {/* Header */}
@@ -115,92 +122,142 @@ export default function PersonaPlaygroundTab({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Trigger</label>
-            <input
-              type="text"
+          <div className="grid grid-cols-3 gap-4 items-start">
+            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Trigger</label>
+            <AutoTextarea
               value={persona.trigger}
               onChange={(e) => onUpdatePersona(persona.id, { trigger: e.target.value })}
-              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all"
+              minRows={2}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all resize-none overflow-hidden"
             />
           </div>
 
           <div className="grid grid-cols-3 gap-4 items-start">
             <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Utterance</label>
-            <textarea
+            <AutoTextarea
               value={persona.utterance}
               onChange={(e) => onUpdatePersona(persona.id, { utterance: e.target.value })}
-              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 min-h-[80px] focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all placeholder:text-stone-400 font-serif italic"
+              minRows={3}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all placeholder:text-stone-400 font-serif italic resize-none overflow-hidden"
             />
           </div>
 
           <div className="grid grid-cols-3 gap-4 items-center">
             <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Frequency</label>
-            <div className="col-span-2 flex items-center gap-3">
-              <input
-                type="range"
-                min="1"
-                max="100"
-                value={persona.frequency}
-                onChange={(e) => onUpdatePersona(persona.id, { frequency: parseInt(e.target.value) })}
-                className={`flex-grow ${accentColor} h-1 bg-stone-100 rounded-none cursor-pointer`}
-              />
-              <span className="text-xs font-mono font-bold text-stone-600">{persona.frequency}%</span>
+            <div className="col-span-2 space-y-1">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={persona.frequency}
+                  onChange={(e) => onUpdatePersona(persona.id, { frequency: parseInt(e.target.value) })}
+                  className={`flex-grow ${accentColor} h-1 bg-stone-100 rounded-none cursor-pointer`}
+                />
+                <span className="text-xs font-mono font-bold text-stone-600">{persona.frequency}%</span>
+              </div>
+              {persona.frequencyText && (
+                <p className="text-[10px] font-mono text-stone-400 tracking-wide">
+                  Estimated: {persona.frequencyText}
+                </p>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Pain</label>
-            <input
-              type="text"
+          <div className="grid grid-cols-3 gap-4 items-start">
+            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Pain</label>
+            <AutoTextarea
               value={persona.pain}
               onChange={(e) => onUpdatePersona(persona.id, { pain: e.target.value })}
-              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all"
+              minRows={2}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all resize-none overflow-hidden"
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Reject</label>
-            <input
-              type="text"
+          <div className="grid grid-cols-3 gap-4 items-start">
+            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Reject</label>
+            <AutoTextarea
               value={persona.reject}
               onChange={(e) => onUpdatePersona(persona.id, { reject: e.target.value })}
-              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all"
+              minRows={2}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all resize-none overflow-hidden"
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Expected AI behavior</label>
-            <input
-              type="text"
+          <div className="grid grid-cols-3 gap-4 items-start">
+            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Expected AI behavior</label>
+            <AutoTextarea
               value={persona.expectedAIBehavior || ""}
               onChange={(e) => onUpdatePersona(persona.id, { expectedAIBehavior: e.target.value })}
               placeholder={isHappy ? "e.g. Acknowledge query and guide user back on happy path." : "e.g. Maintain safety boundaries and output specific rejection code."}
-              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all"
+              minRows={2}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all resize-none overflow-hidden"
             />
           </div>
         </div>
 
         {/* Actions Footer */}
-        <div className="p-3 bg-stone-50 border-t border-stone-200 flex justify-end">
-          <button
-            type="button"
-            onClick={() => handleRegen(persona.id)}
-            disabled={loadingMap[persona.id]}
-            className={`flex items-center gap-2 px-4 py-2 border bg-white rounded-none font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50 ${btnBorder}`}
-          >
-            {loadingMap[persona.id] ? (
-              <>
-                <span className="material-symbols-outlined text-[16px] animate-spin">sync</span>
-                Regenerating...
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[16px]">refresh</span>
-                Regenerate
-              </>
-            )}
-          </button>
+        <div className="p-3 bg-stone-50 border-t border-stone-200">
+          {showFeedback && (
+            <div className="mb-3 space-y-2">
+              <AutoTextarea
+                value={feedback}
+                onChange={(e) => setFeedbackMap((prev) => ({ ...prev, [persona.id]: e.target.value }))}
+                placeholder="Describe what you want to change about this persona..."
+                minRows={2}
+                className="w-full bg-white border border-stone-300 rounded-none px-3 py-2 text-[12px] text-stone-800 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none resize-none overflow-hidden placeholder:text-stone-400"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFeedbackMap((prev) => ({ ...prev, [persona.id]: false }))}
+                  className="px-3 py-1.5 border border-stone-300 text-stone-600 bg-white rounded-none font-bold text-[10px] uppercase tracking-wider hover:bg-stone-50 transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRegen(persona.id, feedback || undefined)}
+                  disabled={loadingMap[persona.id]}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-wider hover:bg-[#e04400] transition-all cursor-pointer disabled:opacity-50`}
+                >
+                  {loadingMap[persona.id] ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">sync</span>
+                      Regenerating...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[14px]">play_arrow</span>
+                      Submit &amp; Regenerate
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+          {!showFeedback && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowFeedbackMap((prev) => ({ ...prev, [persona.id]: true }))}
+                disabled={loadingMap[persona.id]}
+                className={`flex items-center gap-2 px-4 py-2 border bg-white rounded-none font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50 ${btnBorder}`}
+              >
+                {loadingMap[persona.id] ? (
+                  <>
+                    <span className="material-symbols-outlined text-[16px] animate-spin">sync</span>
+                    Regenerating...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Regenerate
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

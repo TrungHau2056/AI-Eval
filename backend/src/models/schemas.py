@@ -28,6 +28,7 @@ class FEPersona(BaseModel):
     trigger: str = ""
     utterance: str = ""
     frequency: int = 0
+    frequencyText: str = ""
     pain: str = ""
     reject: str = ""
     expectedAIBehavior: str = ""

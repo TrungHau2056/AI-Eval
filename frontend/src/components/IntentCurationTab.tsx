@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Intent } from "../types";
+import AutoTextarea from "./AutoTextarea";
 
 interface IntentCurationTabProps {
   intents: Intent[];
@@ -157,23 +158,21 @@ export default function IntentCurationTab({
 
                   {/* Utterance input cell */}
                   <td className="px-4 py-2">
-                    <span className="text-stone-400 text-[13px] font-serif select-none mr-1">"</span>
-                    <input
-                      type="text"
+                    <AutoTextarea
                       value={item.utterance}
                       onChange={(e) => onUpdateIntent(item.id, { utterance: e.target.value })}
-                      className="bg-transparent border-none p-0 text-[13px] text-stone-600 italic font-serif w-[calc(100%-20px)] inline focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00]"
+                      minRows={2}
+                      className="bg-transparent border-none p-0 text-[13px] text-stone-600 italic font-serif w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden"
                     />
-                    <span className="text-stone-400 text-[13px] font-serif select-none ml-1">"</span>
                   </td>
 
                   {/* Trigger Moment input cell */}
                   <td className="px-4 py-2">
-                    <input
-                      type="text"
+                    <AutoTextarea
                       value={item.triggerMoment}
                       onChange={(e) => onUpdateIntent(item.id, { triggerMoment: e.target.value })}
-                      className="bg-transparent border-none p-0 text-[13px] text-stone-500 w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00]"
+                      minRows={2}
+                      className="bg-transparent border-none p-0 text-[13px] text-stone-500 w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden"
                     />
                   </td>
 

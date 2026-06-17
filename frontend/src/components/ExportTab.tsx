@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { TestCase } from "../types";
+import AutoTextarea from "./AutoTextarea";
 
 interface ExportTabProps {
   testCases: TestCase[];
@@ -222,21 +223,31 @@ export default function ExportTab({
                       {tc.personaName}
                     </td>
 
-                    <td className="px-4 py-4 text-stone-600 text-[13px] font-serif italic">
-                      "{tc.simulatedPrompt}"
+                    <td className="px-4 py-2">
+                      <AutoTextarea
+                        value={tc.simulatedPrompt}
+                        readOnly
+                        minRows={2}
+                        className="w-full bg-transparent border-none p-0 text-[13px] text-stone-600 font-serif italic focus:ring-0 focus:outline-none resize-none overflow-hidden"
+                      />
                     </td>
 
-                    <td className="px-4 py-4 text-stone-500 text-[12px]">
-                      {tc.expectedOutcome}
+                    <td className="px-4 py-2">
+                      <AutoTextarea
+                        value={tc.expectedOutcome}
+                        readOnly
+                        minRows={2}
+                        className="w-full bg-transparent border-none p-0 text-[12px] text-stone-500 focus:ring-0 focus:outline-none resize-none overflow-hidden"
+                      />
                     </td>
 
                     <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                      <textarea
+                      <AutoTextarea
                         value={tc.goal || ""}
                         onChange={(e) => onUpdateTestCase(tc.id, { goal: e.target.value })}
                         placeholder="Assert boundary policy validation"
-                        rows={3}
-                        className="w-full bg-stone-50 border border-stone-200 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none text-[11px] px-2.5 py-1 rounded-none text-stone-800 font-mono resize-y min-h-[40px]"
+                        minRows={2}
+                        className="w-full bg-stone-50 border border-stone-200 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none text-[11px] px-2.5 py-1 rounded-none text-stone-800 font-mono resize-none overflow-hidden"
                       />
                       {tc.status && tc.status !== "pending" && (
                         <div className="flex items-center gap-1 mt-1 text-[9px] uppercase tracking-wider font-mono justify-between">

@@ -15,6 +15,7 @@ export interface Persona {
   trigger: string;
   utterance: string;
   frequency: number; // percentage (0 - 100)
+  frequencyText?: string; // raw text from pipeline e.g. "2-3 lần/tuần"
   pain: string;
   reject: string;
   expectedAIBehavior?: string;
