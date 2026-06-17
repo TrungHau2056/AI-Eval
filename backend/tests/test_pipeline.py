@@ -1,5 +1,5 @@
 from src.pipeline.intent_extractor import IntentExtractor
-from src.pipeline.persona_generator import PersonaGenerator
+from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
 from src.memory.conversation_memory import ConversationMemory
 from src.api.deps import get_memory, reset_state
@@ -16,6 +16,8 @@ class MockLLM:
     async def generate_structured(self, prompt, schema, system_prompt=""):
         return self.response
 
+
+# --- Intent ---
 
 def test_intent_extractor_parse():
     response = '''```json
@@ -44,20 +46,52 @@ def test_intent_extractor_deduplicate():
     assert len(deduped) == 2
 
 
-def test_persona_generator_parse():
+# --- Persona ---
+
+def test_persona_agent_parse():
     response = '''{
         "personas": [
             {"name": "Easy User", "description": "Patient and clear", "trait_type": "easy"},
             {"name": "Hard User", "description": "Impatient and vague", "trait_type": "hard"}
         ]
     }'''
-    gen = PersonaGenerator(MockLLM(response))
-    personas = gen._parse_response(response, "intent_1")
-    assert len(personas) == 2
-    assert personas[0].trait_type == "easy"
-    assert personas[1].trait_type == "hard"
-    assert personas[0].intent_id == "intent_1"
+    intent = Intent(id="i1", context="Refund", goal="Get money back", evidence=[])
+    agent = PersonaAgent(MockLLM(response))
+    results = agent._parse(response, "i1")
+    assert len(results) == 2
+    assert results[0]["trait_type"] == "easy"
+    assert results[1]["trait_type"] == "hard"
+    assert results[0]["intent_id"] == "i1"
 
+
+def test_persona_agent_parse_empty():
+    agent = PersonaAgent(MockLLM(""))
+    results = agent._parse("{}", "i1")
+    assert len(results) == 0
+
+
+def test_persona_agent_memory_integrated():
+    intent = Intent(id="i1", context="Refund", goal="Get money back", evidence=[])
+    memory = ConversationMemory()
+    agent = PersonaAgent(MockLLM(""), memory=memory)
+
+    prompt = agent._build_prompt(intent, "")
+    assert "Lịch sử" not in prompt
+
+    memory.add("feedback", "Make persona harder")
+    prompt = agent._build_prompt(intent, "")
+    assert "Make persona harder" in prompt
+    assert "Lịch sử" in prompt
+
+
+def test_persona_agent_add_feedback():
+    memory = ConversationMemory()
+    agent = PersonaAgent(MockLLM(""), memory=memory)
+    agent.add_feedback("Persona quá chung chung")
+    assert "Persona quá chung chung" in memory.get_context()
+
+
+# --- Test Case ---
 
 def test_test_case_agent_parse():
     persona = Persona(id="p1", intent_id="i1", name="Easy User", description="Patient", trait_type="easy")
@@ -79,35 +113,7 @@ def test_test_case_agent_parse_empty():
     assert len(results) == 0
 
 
-def test_memory_add_and_get_context():
-    memory = ConversationMemory()
-    memory.add("user", "Hãy sinh test case khó hơn")
-    memory.add("assistant", ["Test case 1", "Test case 2"])
-    memory.add("feedback", "Persona easy chưa đủ chi tiết")
-    ctx = memory.get_context()
-    assert "Hãy sinh test case khó hơn" in ctx
-    assert "Test case 1" in ctx
-    assert "Persona easy chưa đủ chi tiết" in ctx
-
-
-def test_memory_get_context_max_entries():
-    memory = ConversationMemory()
-    memory.add("user", "guidance 1")
-    memory.add("assistant", ["result 1"])
-    memory.add("user", "guidance 2")
-    ctx = memory.get_context(max_entries=2)
-    assert "guidance 1" not in ctx
-    assert "guidance 2" in ctx
-
-
-def test_memory_clear():
-    memory = ConversationMemory()
-    memory.add("user", "test")
-    memory.clear()
-    assert memory.get_context() == ""
-
-
-def test_agent_memory_integrated():
+def test_test_case_agent_memory_integrated():
     persona = Persona(id="p1", intent_id="i1", name="Easy User", description="Patient", trait_type="easy")
     intent = Intent(id="i1", context="Refund", goal="Get money back", evidence=[])
     response = '{"test_cases": [{"prompt_text": "I need a refund please"}]}'
@@ -137,6 +143,38 @@ def test_agent_clear_memory():
     agent.clear_memory()
     assert memory.get_context() == ""
 
+
+# --- Memory ---
+
+def test_memory_add_and_get_context():
+    memory = ConversationMemory()
+    memory.add("user", "Hãy sinh test case khó hơn")
+    memory.add("assistant", ["Test case 1", "Test case 2"])
+    memory.add("feedback", "Persona easy chưa đủ chi tiết")
+    ctx = memory.get_context()
+    assert "Hãy sinh test case khó hơn" in ctx
+    assert "Test case 1" in ctx
+    assert "Persona easy chưa đủ chi tiết" in ctx
+
+
+def test_memory_get_context_max_entries():
+    memory = ConversationMemory()
+    memory.add("user", "guidance 1")
+    memory.add("assistant", ["result 1"])
+    memory.add("user", "guidance 2")
+    ctx = memory.get_context(max_entries=2)
+    assert "guidance 1" not in ctx
+    assert "guidance 2" in ctx
+
+
+def test_memory_clear():
+    memory = ConversationMemory()
+    memory.add("user", "test")
+    memory.clear()
+    assert memory.get_context() == ""
+
+
+# --- Deps memory ---
 
 def test_deps_memory_per_agent():
     reset_state()

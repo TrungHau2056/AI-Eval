@@ -3,16 +3,26 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from src.api.deps import get_state
+from src.api.deps import get_memory, get_state
 from src.llm.factory import create_llm_client
-from src.pipeline.persona_generator import PersonaGenerator
+from src.models.schemas import Persona
+from src.pipeline.persona_generator import PersonaAgent
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
+
+AGENT_NAME = "persona"
 
 
 class GenerateRequest(BaseModel):
     model: str = "gemini"
     api_key: str
+    guidance: str = ""
+
+
+class RegenerateSingleRequest(BaseModel):
+    model: str = "gemini"
+    api_key: str
+    persona_id: str
     guidance: str = ""
 
 
@@ -34,6 +44,16 @@ def list_personas():
     return [p.model_dump() for p in state.personas if p.status != "deleted"]
 
 
+@router.delete("/{persona_id}")
+def delete_persona(persona_id: str):
+    state = get_state()
+    persona = next((p for p in state.personas if p.id == persona_id), None)
+    if not persona:
+        raise HTTPException(404, f"Không tìm thấy persona: {persona_id}")
+    persona.status = "deleted"
+    return {"status": "deleted", "id": persona_id}
+
+
 @router.post("/generate")
 def generate_personas(req: GenerateRequest):
     state = get_state()
@@ -45,15 +65,16 @@ def generate_personas(req: GenerateRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    gen = PersonaGenerator(llm)
+    agent = PersonaAgent(llm, memory=get_memory(AGENT_NAME))
     loop = asyncio.new_event_loop()
     try:
-        state.personas = loop.run_until_complete(gen.generate(approved, req.guidance))
+        results = loop.run_until_complete(agent.run(approved, req.guidance))
     except Exception as e:
         raise HTTPException(500, f"Lỗi sinh Persona: {e}")
     finally:
         loop.close()
-    return [p.model_dump() for p in state.personas]
+    state.personas = [Persona(**r) for r in results]
+    return results
 
 
 @router.put("")
@@ -98,12 +119,50 @@ def regenerate_personas(req: GenerateRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    gen = PersonaGenerator(llm)
+    agent = PersonaAgent(llm, memory=get_memory(AGENT_NAME))
     loop = asyncio.new_event_loop()
     try:
-        state.personas = loop.run_until_complete(gen.generate(approved, req.guidance))
+        results = loop.run_until_complete(agent.run(approved, req.guidance))
     except Exception as e:
         raise HTTPException(500, f"Lỗi regenerate: {e}")
     finally:
         loop.close()
-    return [p.model_dump() for p in state.personas]
+    state.personas = [Persona(**r) for r in results]
+    return results
+
+
+@router.post("/regenerate-single")
+def regenerate_single_persona(req: RegenerateSingleRequest):
+    state = get_state()
+    target = next((p for p in state.personas if p.id == req.persona_id and p.status != "deleted"), None)
+    if not target:
+        raise HTTPException(404, f"Không tìm thấy persona: {req.persona_id}")
+
+    intent = next((i for i in state.intents if i.id == target.intent_id and i.status != "deleted"), None)
+    if not intent:
+        raise HTTPException(400, "Intent của persona này không còn tồn tại")
+
+    try:
+        llm = create_llm_client(req.model, req.api_key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    agent = PersonaAgent(llm, memory=get_memory(AGENT_NAME))
+    if req.guidance:
+        agent.add_feedback(f"Regenerate persona '{target.name}': {req.guidance}")
+
+    loop = asyncio.new_event_loop()
+    try:
+        results = loop.run_until_complete(agent.run_single(intent, req.guidance))
+    except Exception as e:
+        raise HTTPException(500, f"Lỗi regenerate: {e}")
+    finally:
+        loop.close()
+
+    if not results:
+        raise HTTPException(500, "LLM không sinh được persona mới")
+
+    target.status = "deleted"
+    new_persona = Persona(**results[0])
+    state.personas.append(new_persona)
+    return new_persona.model_dump()
