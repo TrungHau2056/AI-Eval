@@ -8,3 +8,6 @@ __pycache__/
 dist/
 build/
 .claude/
+
+backend/test_cases.csv
+backend/test_cases.md

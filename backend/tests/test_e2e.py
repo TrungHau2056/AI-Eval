@@ -1,11 +1,11 @@
 import asyncio
-import json
 import os
 import pytest
 
 from dotenv import load_dotenv
 from src.llm.factory import create_llm_client
-from src.models.schemas import Intent, Persona
+from src.models.schemas import Intent, Persona, RawInput
+from src.pipeline.intent_extractor import IntentAgent
 from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
 
@@ -20,116 +20,99 @@ def get_llm():
     return create_llm_client("openai", API_KEY)
 
 
-def test_e2e_persona_agent():
-    llm = get_llm()
-    intents = [
-        Intent(context="User wants refund for order", goal="Get money back for defective product", evidence=["I want a refund", "Product is defective and can't exchange"]),
-        Intent(context="User asks about delivery time", goal="Know when order arrives", evidence=["How long for delivery?", "When will I receive it?"]),
-    ]
+SAMPLE_RAW_TEXT = """
+I bought a phone last week and it arrived with a cracked screen. I want a refund immediately!
+The delivery took 10 days, way too long. When I try to track my order it says "processing" for days.
+I need to change my shipping address but there's no option in the app. Help please.
+The product quality is great but the customer service is terrible. No one replies to my emails.
+Can I return this item? It doesn't fit. I ordered size M but it runs small.
+I've been waiting for 2 weeks and my order still hasn't shipped. This is unacceptable.
+"""
 
-    agent = PersonaAgent(llm)
+
+def test_e2e_intent_agent():
+    llm = get_llm()
+    raw_input = RawInput(source_type="text", content=SAMPLE_RAW_TEXT)
+
+    agent = IntentAgent(llm)
     loop = asyncio.new_event_loop()
     try:
-        results = loop.run_until_complete(agent.run(intents))
+        results = loop.run_until_complete(agent.run(raw_input))
     finally:
         loop.close()
 
-    assert len(results) >= 2, f"Expected at least 2 personas, got {len(results)}"
+    assert len(results) >= 2, f"Expected at least 2 intents, got {len(results)}"
 
     for r in results:
         assert "id" in r
-        assert "intent_id" in r
-        assert "name" in r
-        assert r["name"], "name should not be empty"
-        assert "description" in r
-        assert r["description"], "description should not be empty"
-        assert "trait_type" in r
-        assert r["trait_type"] in ("easy", "hard"), f"Invalid trait_type: {r['trait_type']}"
+        assert r.get("intent_name"), "intent_name should not be empty"
+        assert r.get("utterance"), "utterance should not be empty"
 
-    easy_count = sum(1 for r in results if r["trait_type"] == "easy")
-    hard_count = sum(1 for r in results if r["trait_type"] == "hard")
-    assert easy_count >= 1, f"Expected at least 1 easy persona, got {easy_count}"
-    assert hard_count >= 1, f"Expected at least 1 hard persona, got {hard_count}"
+    # LLM returns Vietnamese text; avoid print() on cp1252 Windows console
 
 
-def test_e2e_test_case_agent():
+def test_e2e_intent_with_guidance():
     llm = get_llm()
-    intent = Intent(
-        id="i1",
-        context="User wants refund for order",
-        goal="Get money back for defective product",
-        evidence=["I want a refund", "Product is defective"],
-    )
-    personas = [
-        Persona(id="p1", intent_id="i1", name="Patient User", description="Patient user who explains issues clearly", trait_type="easy"),
-        Persona(id="p2", intent_id="i1", name="Impatient User", description="Impatient user who types short messages and complains", trait_type="hard"),
-    ]
+    raw_input = RawInput(source_type="text", content=SAMPLE_RAW_TEXT)
 
-    agent = TestCaseAgent(llm)
-    loop = asyncio.new_event_loop()
-    try:
-        results = loop.run_until_complete(agent.run(personas, [intent]))
-    finally:
-        loop.close()
-
-    assert len(results) >= 1, f"Expected at least 1 test case, got {len(results)}"
-
-    for r in results:
-        assert "id" in r
-        assert "persona_id" in r
-        assert "intent_id" in r
-        assert "prompt_text" in r
-        assert r["prompt_text"], "prompt_text should not be empty"
-
-
-def test_e2e_persona_with_guidance():
-    llm = get_llm()
-    intents = [
-        Intent(context="User wants refund", goal="Get money back", evidence=["Refund please"]),
-    ]
-
-    agent = PersonaAgent(llm)
+    agent = IntentAgent(llm)
     loop = asyncio.new_event_loop()
     try:
         results = loop.run_until_complete(
-            agent.run(intents, guidance="Create personas with detailed background and occupation")
+            agent.run(raw_input, guidance="Focus on delivery and refund related intents only")
         )
     finally:
         loop.close()
 
-    assert len(results) >= 2
+    assert len(results) >= 1
     for r in results:
-        assert r["name"], "name should not be empty"
-        assert r["description"], "description should not be empty"
+        assert r.get("intent_name"), "intent_name should not be empty"
 
 
-def test_e2e_full_pipeline():
+def test_e2e_full_3_agent_pipeline():
     llm = get_llm()
 
-    raw_intents = [
-        Intent(context="User wants refund for order", goal="Get money back for defective product", evidence=["I want a refund", "Product is defective"]),
-    ]
+    # Step 1: IntentAgent
+    raw_input = RawInput(source_type="text", content=SAMPLE_RAW_TEXT)
+    intent_agent = IntentAgent(llm)
+    loop = asyncio.new_event_loop()
+    try:
+        intent_dicts = loop.run_until_complete(intent_agent.run(raw_input))
+    finally:
+        loop.close()
 
+    assert len(intent_dicts) >= 2, f"Step 1 failed: got {len(intent_dicts)} intents"
+    intents = [Intent(**d) for d in intent_dicts]
+
+    # Step 2: PersonaAgent
     persona_agent = PersonaAgent(llm)
     loop = asyncio.new_event_loop()
     try:
-        personas_dict = loop.run_until_complete(persona_agent.run(raw_intents))
+        persona_dicts = loop.run_until_complete(persona_agent.run(intents))
     finally:
         loop.close()
 
-    assert len(personas_dict) >= 2
+    assert len(persona_dicts) >= 2, f"Step 2 failed: got {len(persona_dicts)} personas"
+    personas = [Persona(**d) for d in persona_dicts]
 
-    personas = [Persona(**p) for p in personas_dict]
+    easy = [p for p in personas if p.trait_type == "easy"]
+    hard = [p for p in personas if p.trait_type == "hard"]
+    assert len(easy) >= 1, "Expected at least 1 easy persona"
+    assert len(hard) >= 1, "Expected at least 1 hard persona"
 
+    # Step 3: TestCaseAgent
     tc_agent = TestCaseAgent(llm)
     loop = asyncio.new_event_loop()
     try:
-        test_cases = loop.run_until_complete(tc_agent.run(personas, raw_intents))
+        test_cases = loop.run_until_complete(tc_agent.run(personas, intents))
     finally:
         loop.close()
 
-    assert len(test_cases) >= 1
-
+    assert len(test_cases) >= 1, f"Step 3 failed: got {len(test_cases)} test cases"
     for tc in test_cases:
-        assert tc["prompt_text"], "prompt_text should not be empty"
+        assert tc.get("start"), "start should not be empty"
+        assert tc.get("end_expected_outcome"), "end_expected_outcome should not be empty"
         assert tc["persona_id"] in [p.id for p in personas]
+        assert tc["intent_id"] in [i.id for i in intents]
+
+    # Pipeline completed: intents -> personas -> test cases
