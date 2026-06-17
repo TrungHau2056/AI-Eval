@@ -3,16 +3,26 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from src.api.deps import get_state
+from src.api.deps import get_memory, get_state
 from src.llm.factory import create_llm_client
-from src.pipeline.test_prompt_generator import TestCasePromptGenerator
+from src.models.schemas import TestCasePrompt
+from src.pipeline.test_prompt_generator import TestCaseAgent
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
+
+AGENT_NAME = "test_case"
 
 
 class GenerateRequest(BaseModel):
     model: str = "gemini"
     api_key: str
+    guidance: str = ""
+
+
+class RegenerateSingleRequest(BaseModel):
+    model: str = "gemini"
+    api_key: str
+    test_case_id: str
     guidance: str = ""
 
 
@@ -32,6 +42,16 @@ def list_prompts():
     return [t.model_dump() for t in state.test_prompts if t.status != "deleted"]
 
 
+@router.delete("/{test_case_id}")
+def delete_prompt(test_case_id: str):
+    state = get_state()
+    prompt = next((t for t in state.test_prompts if t.id == test_case_id), None)
+    if not prompt:
+        raise HTTPException(404, f"Không tìm thấy test case: {test_case_id}")
+    prompt.status = "deleted"
+    return {"status": "deleted", "id": test_case_id}
+
+
 @router.post("/generate")
 def generate_prompts(req: GenerateRequest):
     state = get_state()
@@ -44,17 +64,18 @@ def generate_prompts(req: GenerateRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    gen = TestCasePromptGenerator(llm)
+    agent = TestCaseAgent(llm, memory=get_memory(AGENT_NAME))
     loop = asyncio.new_event_loop()
     try:
-        state.test_prompts = loop.run_until_complete(
-            gen.generate(approved_intents, approved_personas, req.guidance)
+        results = loop.run_until_complete(
+            agent.run(approved_personas, approved_intents, req.guidance)
         )
     except Exception as e:
-        raise HTTPException(500, f"Lỗi sinh Test Prompt: {e}")
+        raise HTTPException(500, f"Lỗi sinh Test Case: {e}")
     finally:
         loop.close()
-    return [t.model_dump() for t in state.test_prompts]
+    state.test_prompts = [TestCasePrompt(**r) for r in results]
+    return results
 
 
 @router.put("")
@@ -86,14 +107,55 @@ def regenerate_prompts(req: GenerateRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    gen = TestCasePromptGenerator(llm)
+    agent = TestCaseAgent(llm, memory=get_memory(AGENT_NAME))
     loop = asyncio.new_event_loop()
     try:
-        state.test_prompts = loop.run_until_complete(
-            gen.generate(approved_intents, approved_personas, req.guidance)
+        results = loop.run_until_complete(
+            agent.run(approved_personas, approved_intents, req.guidance)
         )
     except Exception as e:
         raise HTTPException(500, f"Lỗi regenerate: {e}")
     finally:
         loop.close()
-    return [t.model_dump() for t in state.test_prompts]
+    state.test_prompts = [TestCasePrompt(**r) for r in results]
+    return results
+
+
+@router.post("/regenerate-single")
+def regenerate_single_prompt(req: RegenerateSingleRequest):
+    state = get_state()
+    target = next((t for t in state.test_prompts if t.id == req.test_case_id and t.status != "deleted"), None)
+    if not target:
+        raise HTTPException(404, f"Không tìm thấy test case: {req.test_case_id}")
+
+    intent = next((i for i in state.intents if i.id == target.intent_id and i.status != "deleted"), None)
+    persona = next((p for p in state.personas if p.id == target.persona_id and p.status != "deleted"), None)
+    if not intent or not persona:
+        raise HTTPException(400, "Intent hoặc Persona của test case này không còn tồn tại")
+
+    try:
+        llm = create_llm_client(req.model, req.api_key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    agent = TestCaseAgent(llm, memory=get_memory(AGENT_NAME))
+    if req.guidance:
+        agent.add_feedback(f"Regenerate test case '{target.prompt_text}': {req.guidance}")
+
+    loop = asyncio.new_event_loop()
+    try:
+        results = loop.run_until_complete(
+            agent.run_single(persona, intent, req.guidance)
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Lỗi regenerate: {e}")
+    finally:
+        loop.close()
+
+    if not results:
+        raise HTTPException(500, "LLM không sinh được test case mới")
+
+    target.status = "deleted"
+    new_tc = TestCasePrompt(**results[0])
+    state.test_prompts.append(new_tc)
+    return new_tc.model_dump()
