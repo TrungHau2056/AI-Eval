@@ -1,11 +1,14 @@
 import json
 import logging
-from typing import Any
+from typing import Any, TypedDict, Literal
+
+from langgraph.graph import END, START, StateGraph
 
 from src.llm.base import LLMClient
 from src.memory.base import BaseMemory
 from src.memory.conversation_memory import ConversationMemory
 from src.models.schemas import Intent, Persona, TestCasePrompt
+from src.observability.langfuse import capture_io_enabled, langfuse_observation
 
 logger = logging.getLogger(__name__)
 
@@ -63,56 +66,123 @@ Trả về JSON dạng:
 }}"""
 
 
+class TestCaseState(TypedDict):
+    personas: list[Persona]
+    intents: list[Intent]
+    guidance: str
+    current_persona_idx: int
+    all_test_cases: list[dict[str, Any]]
+
+
 class TestCaseAgent:
     def __init__(self, llm: LLMClient, memory: BaseMemory | None = None):
         self.llm = llm
         self.memory = memory or ConversationMemory()
+        self.graph = self._build_graph()
 
-    async def run(self, personas: list[Persona], intents: list[Intent], guidance: str = "") -> list[dict[str, Any]]:
+    def _build_graph(self):
+        workflow = StateGraph(TestCaseState)
+        workflow.add_node("prepare", self._prepare_node)
+        workflow.add_node("generate_test_case", self._generate_test_case_node)
+
+        workflow.add_edge(START, "prepare")
+        workflow.add_edge("prepare", "generate_test_case")
+        workflow.add_conditional_edges(
+            "generate_test_case",
+            self._route_next_persona,
+            ["generate_test_case", END]
+        )
+        return workflow.compile()
+
+    def _prepare_node(self, state: TestCaseState) -> dict[str, Any]:
+        logger.info("TestCaseGraph | prepare | total_personas=%d", len(state["personas"]))
+        return {
+            "current_persona_idx": 0,
+            "all_test_cases": []
+        }
+
+    async def _generate_test_case_node(self, state: TestCaseState) -> dict[str, Any]:
+        idx = state["current_persona_idx"]
+        personas = state["personas"]
+        intents = state["intents"]
+        guidance = state["guidance"]
+
+        persona = personas[idx]
         intent_map = {i.id: i for i in intents}
-        all_test_cases: list[dict[str, Any]] = []
+        intent = intent_map.get(persona.intent_id)
 
-        logger.info("TestCaseAgent.run() | num_personas=%d | num_intents=%d | guidance=%s", len(personas), len(intents), bool(guidance))
+        updated_test_cases = list(state.get("all_test_cases", []))
 
-        if guidance:
-            self.memory.add("user", guidance)
+        if not intent:
+            logger.warning("TestCaseGraph | skipping persona %s: no matching intent found (intent_id=%s)", persona.id, persona.intent_id)
+            return {
+                "current_persona_idx": idx + 1
+            }
 
-        for idx, persona in enumerate(personas):
-            intent = intent_map.get(persona.intent_id)
-            if not intent:
-                logger.warning("Skipping persona %s: no matching intent found (intent_id=%s)", persona.id, persona.intent_id)
-                continue
-
-            logger.info("Generating test case %d/%d | persona_type=%s | intent=%s", idx + 1, len(personas), persona.persona_type, persona.intent_name)
-            prompt = self._build_prompt(persona, intent, guidance)
-            logger.info("Calling LLM.generate() for test case %d ...", idx + 1)
-            raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
-            logger.info("LLM responded for test case %d | response_length=%d", idx + 1, len(raw))
-            test_cases = self._parse(raw, persona, intent)
-            logger.info("Parsed %d test cases from persona %d", len(test_cases), idx + 1)
-
-            self.memory.add("assistant", [tc.get("start", "") for tc in test_cases])
-
-            all_test_cases.extend(test_cases)
-
-        logger.info("TestCaseAgent.run() done | total=%d test cases", len(all_test_cases))
-        return all_test_cases
-
-    async def run_single(self, persona: Persona, intent: Intent, guidance: str = "") -> list[dict[str, Any]]:
-        logger.info("TestCaseAgent.run_single() | persona=%s | intent=%s | guidance=%s", persona.persona_type, intent.intent_name, bool(guidance))
-        if guidance:
-            self.memory.add("user", guidance)
-
+        logger.info("TestCaseGraph | generate_test_case | persona %d/%d (type=%s) | intent=%s", idx + 1, len(personas), persona.persona_type, persona.intent_name)
         prompt = self._build_prompt(persona, intent, guidance)
-        logger.info("Calling LLM.generate() for single test case ...")
-        raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
-        logger.info("LLM responded | response_length=%d", len(raw))
-        test_cases = self._parse(raw, persona, intent)
-        logger.info("Parsed %d test cases", len(test_cases))
+
+        with langfuse_observation(
+            "test-case-generator",
+            as_type="generation",
+            model=str(getattr(self.llm, "model", self.llm.__class__.__name__)),
+            input=prompt if capture_io_enabled() else {"persona_num": persona.persona_num, "intent_name": persona.intent_name},
+            metadata={"persona_num": persona.persona_num, "intent_id": persona.intent_id},
+        ) as generation:
+            raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
+            test_cases = self._parse(raw, persona, intent)
+            logger.info("TestCaseGraph | generate_test_case | parsed %d test cases for persona %d", len(test_cases), idx + 1)
+            
+            generation.update(
+                output=raw if capture_io_enabled() else {"test_case_count": len(test_cases)}
+            )
 
         self.memory.add("assistant", [tc.get("start", "") for tc in test_cases])
+        updated_test_cases.extend(test_cases)
 
-        return test_cases
+        return {
+            "all_test_cases": updated_test_cases,
+            "current_persona_idx": idx + 1
+        }
+
+    def _route_next_persona(self, state: TestCaseState) -> Literal["generate_test_case", END]:
+        if state["current_persona_idx"] < len(state["personas"]):
+            return "generate_test_case"
+        return END
+
+    async def run(self, personas: list[Persona], intents: list[Intent], guidance: str = "") -> list[dict[str, Any]]:
+        logger.info("TestCaseAgent.run() via LangGraph | num_personas=%d | num_intents=%d | guidance=%s", len(personas), len(intents), bool(guidance))
+        if guidance:
+            self.memory.add("user", guidance)
+
+        with langfuse_observation(
+            "test-case-generation",
+            as_type="span",
+            input={
+                "persona_count": len(personas),
+                "intent_count": len(intents),
+                "guidance_provided": bool(guidance),
+            },
+            metadata={"stage": "test_case_generation", "architecture": "langgraph"},
+        ) as span:
+            initial_state: TestCaseState = {
+                "personas": personas,
+                "intents": intents,
+                "guidance": guidance,
+                "current_persona_idx": 0,
+                "all_test_cases": []
+            }
+            final_state = await self.graph.ainvoke(initial_state)
+            result = final_state.get("all_test_cases", [])
+            span.update(
+                output={"test_case_count": len(result)}
+            )
+            logger.info("TestCaseAgent.run() via LangGraph done | total=%d test cases", len(result))
+            return result
+
+    async def run_single(self, persona: Persona, intent: Intent, guidance: str = "") -> list[dict[str, Any]]:
+        logger.info("TestCaseAgent.run_single() via LangGraph | persona=%s | intent=%s | guidance=%s", persona.persona_type, intent.intent_name, bool(guidance))
+        return await self.run([persona], [intent], guidance)
 
     def add_feedback(self, feedback: str) -> None:
         self.memory.add("feedback", feedback)
