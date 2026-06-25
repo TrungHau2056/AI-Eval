@@ -9,7 +9,7 @@ backend_path = os.path.abspath(os.path.dirname(__file__))
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
-from src.crawlers.tiktok_crawler import TiktokCrawler
+from src.crawlers.facebook_crawler import FacebookCrawler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,18 +25,19 @@ async def main():
         print("Missing APIFY_TOKEN in backend/.env")
         return
 
-    crawler = TiktokCrawler(
+    crawler = FacebookCrawler(
         apify_token=token,
         search_limit=10,
+        posts_limit=3,
     )
 
-    keywords = ["Vinfast VF8"]
-    print(f"Starting crawl TikTok for keyword: {keywords}")
+    keywords = ["quán cà phê Hà Nội"]
+    print(f"Starting crawl Facebook for keyword: {keywords}")
 
     try:
-        result = await crawler.run(keywords=keywords)
+        result = await crawler.run(keywords)
 
-        output_path = os.path.join(backend_path, "tiktok_crawl_output.txt")
+        output_path = os.path.join(backend_path, "facebook_crawl_output.txt")
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(result)
 

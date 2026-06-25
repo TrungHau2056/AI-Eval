@@ -7,14 +7,13 @@ Output là 1 string formatted sẵn sàng cho IntentAgent.
 """
 from __future__ import annotations
 import logging
+import json
 from typing import Any
 from src.crawlers.base import BaseCrawler
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Actor IDs (Apify Store) — pay-per-event, works on free plan credits
-# ---------------------------------------------------------------------------
 AUTOCOMPLETE_ACTOR = "automation-lab/google-autocomplete-scraper"
 SEARCH_ACTOR = "scraper_one/facebook-posts-search"
 POSTS_ACTOR = "apify/facebook-posts-scraper"
@@ -35,19 +34,12 @@ class FacebookCrawler(BaseCrawler):
         self.search_limit = search_limit
         self.posts_limit = posts_limit
 
-    # ==================================================================
-    # Step 1 — Google Autocomplete (optional; disabled in run() by default)
-    # ==================================================================
     async def get_autocomplete(
         self,
         keyword: str,
         limit: int | None = None,
     ) -> list[str]:
-        """
-        Gọi Google Autocomplete Scraper để mở rộng 1 keyword
-        thành nhiều search queries.
-        Actor: automation-lab/google-autocomplete-scraper
-        """
+        """Gọi automation-lab/google-autocomplete-scraper để mở rộng keyword."""
         limit = limit or self.autocomplete_limit
         run_input: dict[str, Any] = {
             "keywords": [keyword],
@@ -87,18 +79,12 @@ class FacebookCrawler(BaseCrawler):
         logger.info("Autocomplete '%s' → %d queries: %s", keyword, len(suggestions), suggestions[:5])
         return suggestions[:limit]
 
-    # ==================================================================
-    # Step 2 — Facebook Search Posts
-    # ==================================================================
     async def search_posts(
         self,
         query: str,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Tìm bài viết Facebook bằng keyword.
-        Actor: scraper_one/facebook-posts-search
-        """
+        """Tìm bài viết Facebook qua scraper_one/facebook-posts-search."""
         limit = limit or self.search_limit
         run_input: dict[str, Any] = {
             "query": query,
@@ -113,22 +99,15 @@ class FacebookCrawler(BaseCrawler):
         logger.info("Search '%s' → %d results.", query, len(items))
         return items
 
-    # ==================================================================
-    # Step 3 — Facebook Posts Scraper (deep scrape)
-    # ==================================================================
     async def scrape_posts(
         self,
         urls: list[str],
     ) -> list[dict[str, Any]]:
-        """
-        Scrape nội dung đầy đủ (text + comments) từ list URLs.
-        Actor: apify/facebook-posts-scraper
-        """
+        """Scrape nội dung đầy đủ từ URLs qua apify/facebook-posts-scraper."""
         if not urls:
             return []
-        start_urls = [{"url": u} for u in urls]
         run_input: dict[str, Any] = {
-            "startUrls": start_urls,
+            "startUrls": [{"url": u} for u in urls],
             "resultsLimit": self.posts_limit,
         }
         try:
@@ -145,21 +124,29 @@ class FacebookCrawler(BaseCrawler):
             item.get("url")
             or item.get("post_url")
             or item.get("postUrl")
+            or item.get("facebookUrl")
             or item.get("link")
             or item.get("permalink")
             or ""
         )
 
-    # ==================================================================
-    # Orchestrator — chạy toàn bộ pipeline
-    # ==================================================================
+    @staticmethod
+    def _attachment_caption(item: dict[str, Any]) -> str:
+        attachments = item.get("attachments")
+        if not isinstance(attachments, list):
+            return ""
+        for att in attachments:
+            if not isinstance(att, dict):
+                continue
+            caption = att.get("accessibilityCaption") or att.get("title") or att.get("description")
+            if isinstance(caption, str) and caption.strip():
+                return caption.strip()
+        return ""
+
     async def run(self, keywords: list[str]) -> str:
         """
-        Full pipeline:
-            keywords → search → scrape → formatted string
-        Autocomplete is skipped by default to save Apify cost.
-        Nếu Step 3 (scrape_posts) không trả kết quả, fallback sang
-        content từ Step 2 (search_posts).
+        keywords → search → scrape → formatted string.
+        Autocomplete skipped by default to save Apify cost.
         """
         all_posts: list[dict[str, Any]] = []
         for keyword in keywords:
@@ -169,8 +156,7 @@ class FacebookCrawler(BaseCrawler):
 
             search_results: list[dict[str, Any]] = []
             for query in queries:
-                results = await self.search_posts(query)
-                search_results.extend(results)
+                search_results.extend(await self.search_posts(query))
             if not search_results:
                 logger.warning("No search results for keyword '%s' — skipping.", keyword)
                 continue
@@ -192,12 +178,9 @@ class FacebookCrawler(BaseCrawler):
 
         return self._format_output(all_posts)
 
-    # ==================================================================
-    # Format helpers
-    # ==================================================================
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
-        return (
+        text = (
             post.get("text")
             or post.get("postText")
             or post.get("message")
@@ -205,6 +188,9 @@ class FacebookCrawler(BaseCrawler):
             or post.get("body")
             or ""
         ).strip()
+        if text:
+            return text
+        return FacebookCrawler._attachment_caption(post)
 
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:
@@ -214,6 +200,8 @@ class FacebookCrawler(BaseCrawler):
     @staticmethod
     def _extract_comments(post: dict[str, Any]) -> list[str]:
         comments_raw = post.get("comments") or post.get("topComments") or []
+        if isinstance(comments_raw, int):
+            return []
         comments: list[str] = []
         if isinstance(comments_raw, list):
             for c in comments_raw:
@@ -235,20 +223,42 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_author(post: dict[str, Any]) -> str:
-        author = (
-            post.get("user")
-            or post.get("userName")
-            or post.get("author")
-            or post.get("pageName")
-            or ""
-        )
+        author = post.get("user") or post.get("userName") or post.get("author") or post.get("pageName") or ""
         if isinstance(author, dict):
             author = author.get("name") or author.get("username") or ""
         return str(author).strip()
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
-        import json
+    @staticmethod
+    def _extract_like_count(post: dict[str, Any]) -> int:
+        reactions = post.get("reactions")
+        if isinstance(reactions, dict) and reactions.get("like") is not None:
+            return int(reactions["like"])
+        for key in ("reactionsCount", "likes", "likeCount", "reactionLikeCount", "likesCount"):
+            val = post.get(key)
+            if val is not None:
+                return int(val)
+        return 0
 
+    @staticmethod
+    def _extract_reply_count(post: dict[str, Any]) -> int:
+        comments = post.get("comments")
+        if isinstance(comments, int):
+            return comments
+        for key in ("commentsCount", "commentCount", "directReplyCount"):
+            val = post.get(key)
+            if val is not None:
+                return int(val)
+        return len(FacebookCrawler._extract_comments(post))
+
+    @staticmethod
+    def _extract_share_count(post: dict[str, Any]) -> int:
+        for key in ("sharesCount", "shareCount", "shares", "repostCount"):
+            val = post.get(key)
+            if val is not None:
+                return int(val)
+        return 0
+
+    def _format_output(self, posts: list[dict[str, Any]]) -> str:
         if not posts:
             return "[]"
 
@@ -271,12 +281,18 @@ class FacebookCrawler(BaseCrawler):
                 "username": author,
                 "isVerified": post.get("isVerified") or post.get("verified") or False,
                 "captionText": text,
-                "takenAtFormatted": post.get("time") or post.get("date") or "",
-                "likeCount": post.get("likes") or post.get("likeCount") or 0,
-                "directReplyCount": post.get("comments") or len(comments),
-                "repostCount": post.get("shares") or post.get("shareCount") or 0,
+                "takenAtFormatted": str(post.get("time") or post.get("date") or post.get("timestamp") or ""),
+                "likeCount": self._extract_like_count(post),
+                "directReplyCount": self._extract_reply_count(post),
+                "repostCount": self._extract_share_count(post),
                 "postUrl": url,
                 "comments": comments[:3],
             })
+
+        if posts and not cleaned_posts:
+            logger.warning(
+                "Facebook formatter dropped %d raw item(s) — no text in known fields.",
+                len(posts),
+            )
 
         return json.dumps(cleaned_posts, ensure_ascii=False, indent=2)

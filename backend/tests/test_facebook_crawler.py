@@ -43,15 +43,20 @@ async def test_full_pipeline(seed_keyword: str = "quán cà phê Hà Nội") -> 
         search_limit=10,
         posts_limit=3,
     )
-    result = await crawler.run([seed_keyword])
 
-    print("\n" + "=" * 60)
-    print("FINAL OUTPUT")
-    print("=" * 60)
+    try:
+        result = await crawler.run([seed_keyword])
 
-    parsed = json.loads(result)
-    print(json.dumps(parsed, indent=2, ensure_ascii=False))
-    print(f"\n✓ {len(parsed)} post(s)")
+        output_path = os.path.join(BACKEND_DIR, "facebook_crawl_output.txt")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(result)
+
+        parsed = json.loads(result)
+        print(json.dumps(parsed, indent=2, ensure_ascii=False))
+        print(f"\n✓ {len(parsed)} post(s)")
+        print(f"DONE! Result saved to: {output_path}")
+    except Exception as e:
+        print(f"Error during crawl: {e}")
 
 
 if __name__ == "__main__":
