@@ -1,5 +1,5 @@
 """
-TikTok Crawler — crawl TikTok via epctex/tiktok-search-scraper.
+TikTok Crawler — crawl TikTok via clockworks/tiktok-scraper.
 Pipeline:
     1. TikTok Search → tìm video TikTok theo keyword, trả về danh sách video có metadata
 Output là 1 chuỗi JSON formatted sẵn sàng cho IntentAgent.
@@ -12,7 +12,8 @@ from src.crawlers.base import BaseCrawler
 
 logger = logging.getLogger(__name__)
 
-SEARCH_ACTOR = "epctex/tiktok-search-scraper"
+# clockworks uses platform credits; epctex returns {"demo": true} placeholders on free tier
+SEARCH_ACTOR = "clockworks/tiktok-scraper"
 
 
 class TiktokCrawler(BaseCrawler):
@@ -28,10 +29,9 @@ class TiktokCrawler(BaseCrawler):
 
     async def search_posts(self, query: str) -> list[dict[str, Any]]:
         run_input: dict[str, Any] = {
-            "search": [query],
-            "maxItems": self.search_limit,
-            "sortType": "RELEVANCE",
-            "dateRange": "DEFAULT",
+            "searchQueries": [query],
+            "resultsPerPage": self.search_limit,
+            "maxProfilesPerQuery": self.search_limit,
         }
         try:
             items = await self._run_actor(SEARCH_ACTOR, run_input)
@@ -43,11 +43,18 @@ class TiktokCrawler(BaseCrawler):
 
     @staticmethod
     def _flatten_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Unwrap grouped actor results into a flat list of video objects."""
+        """Unwrap grouped actor results; drop demo / empty placeholders."""
         flat: list[dict[str, Any]] = []
+        demo_count = 0
         for item in items:
             if not isinstance(item, dict):
                 continue
+            if item.get("demo") is True:
+                demo_count += 1
+                continue
+            if item.get("noResults") is True:
+                continue
+
             nested_lists = (
                 item.get("videos")
                 or item.get("items")
@@ -55,19 +62,30 @@ class TiktokCrawler(BaseCrawler):
                 or item.get("results")
             )
             if isinstance(nested_lists, list) and nested_lists:
-                flat.extend(v for v in nested_lists if isinstance(v, dict))
+                for v in nested_lists:
+                    if isinstance(v, dict) and v.get("demo") is not True and not v.get("noResults"):
+                        flat.append(v)
                 continue
             flat.append(item)
+
+        if demo_count and not flat:
+            logger.warning(
+                "TikTok actor returned %d demo placeholder item(s) only — no real video data.",
+                demo_count,
+            )
         return flat
 
     @staticmethod
     def _normalize_post(post: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(post, dict):
             return {}
-        for key in ("item", "itemStruct", "aweme_info", "aweme", "video"):
+        for key in ("item", "itemStruct", "aweme_info", "aweme"):
             nested = post.get(key)
             if isinstance(nested, dict):
                 return {**post, **nested}
+        video = post.get("video")
+        if isinstance(video, dict):
+            return {**post, **video}
         return post
 
     async def run(self, keywords: list[str]) -> str:
@@ -89,8 +107,8 @@ class TiktokCrawler(BaseCrawler):
     def _extract_text(post: dict[str, Any]) -> str:
         p = TiktokCrawler._normalize_post(post)
         return (
-            p.get("desc")
-            or p.get("text")
+            p.get("text")
+            or p.get("desc")
             or p.get("description")
             or p.get("title")
             or p.get("caption")
@@ -100,37 +118,31 @@ class TiktokCrawler(BaseCrawler):
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:
         p = TiktokCrawler._normalize_post(post)
+        if isinstance(p.get("webVideoUrl"), str) and p["webVideoUrl"]:
+            return p["webVideoUrl"]
         video_id = p.get("id") or p.get("videoId")
-        nickname = p.get("nickname") or p.get("uniqueId") or ""
+        author_meta = p.get("authorMeta") if isinstance(p.get("authorMeta"), dict) else {}
+        nickname = p.get("nickname") or author_meta.get("name") or author_meta.get("uniqueId") or ""
         if video_id and nickname:
             return f"https://www.tiktok.com/@{nickname}/video/{video_id}"
         return (
             p.get("url")
             or p.get("videoUrl")
-            or p.get("webVideoUrl")
             or "N/A"
         )
 
     @staticmethod
     def _extract_author(post: dict[str, Any]) -> str:
         p = TiktokCrawler._normalize_post(post)
+        author_meta = p.get("authorMeta") if isinstance(p.get("authorMeta"), dict) else {}
+        if isinstance(author_meta.get("nickName"), str) and author_meta["nickName"]:
+            return author_meta["nickName"].strip()
+        if isinstance(author_meta.get("name"), str) and author_meta["name"]:
+            return author_meta["name"].strip()
         if isinstance(p.get("nickname"), str) and p["nickname"]:
             return p["nickname"].strip()
         if isinstance(p.get("author"), str) and p["author"]:
             return p["author"].strip()
-
-        author_meta = p.get("authorMeta") or {}
-        if isinstance(author_meta, dict):
-            author = (
-                author_meta.get("uniqueId")
-                or author_meta.get("nickName")
-                or author_meta.get("name")
-                or author_meta.get("id")
-                or ""
-            )
-            if author:
-                return str(author).strip()
-
         return str(p.get("authorName") or "").strip()
 
     @staticmethod
