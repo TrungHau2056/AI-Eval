@@ -9,22 +9,25 @@ const app = express();
 const PORT = 3000;
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
-app.use(express.json());
+// Capture raw body as Buffer for ALL content types (JSON, multipart, binary)
+// so the proxy can forward uploads (multipart/form-data) untouched.
+app.use(express.raw({ type: "*/*", limit: "50mb" }));
 
 // Proxy all /api/* requests to the Python FastAPI backend
 app.all("/api/*", async (req, res) => {
   try {
     const targetUrl = `${BACKEND_URL}${req.originalUrl}`;
-    const fetchOptions: RequestInit = {
-      method: req.method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(req.headers.authorization ? { Authorization: req.headers.authorization as string } : {}),
-      },
-    };
+    const headers: Record<string, string> = {};
+    // Preserve original Content-Type (keeps multipart boundary intact).
+    if (req.headers["content-type"]) headers["Content-Type"] = req.headers["content-type"] as string;
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization as string;
 
-    if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
-      fetchOptions.body = JSON.stringify(req.body);
+    const fetchOptions: RequestInit = { method: req.method, headers };
+
+    const hasBody = req.method !== "GET" && req.method !== "HEAD" && Buffer.isBuffer(req.body) && req.body.length > 0;
+    if (hasBody) {
+      // Forward raw bytes as-is (works for JSON and multipart alike).
+      fetchOptions.body = req.body;
     }
 
     const response = await fetch(targetUrl, fetchOptions);

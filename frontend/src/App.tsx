@@ -8,7 +8,7 @@ import IntentCurationTab from "./components/IntentCurationTab";
 import PersonaPlaygroundTab from "./components/PersonaPlaygroundTab";
 import ExportTab from "./components/ExportTab";
 import RunningTestsModal from "./components/RunningTestsModal";
-import { Intent, Persona, TestCase } from "./types";
+import { Intent, Persona, TestCase, IngestStats } from "./types";
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -17,7 +17,7 @@ export default function App() {
   // App core state
   const [apiKey, setApiKey] = useState("••••••••••••••••");
   const [domain, setDomain] = useState("qa-env-01.local");
-  const [aiModel, setAiModel] = useState("GPT-4o Enterprise");
+  const [aiModel, setAiModel] = useState("Gemini 1.5 Pro");
   const [intents, setIntents] = useState<Intent[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -60,7 +60,7 @@ export default function App() {
         if (data) {
           setApiKey(data.apiKey || "");
           setDomain(data.domain || "");
-          setAiModel(data.aiModel || "GPT-4o Enterprise");
+          setAiModel(data.aiModel || "Gemini 1.5 Pro");
           setIntents(data.intents || []);
           setPersonas(data.personas || []);
           setTestCases(data.testCases || []);
@@ -110,6 +110,30 @@ export default function App() {
     setAiModel(val);
     saveStateToServer({ aiModel: val });
     showToast(`Diagnostic model hot-swapped to: ${val}`, "info");
+  };
+
+  // Step 1a: Ingest multi-source files (server-side FormData → /api/ingest)
+  const handleIngest = async (
+    files: { file: File; sourceType: string }[],
+    prdFile: File | null,
+  ): Promise<IngestStats> => {
+    const fd = new FormData();
+    files.forEach(({ file, sourceType }) => {
+      fd.append("files", file);
+      fd.append("types", sourceType);
+    });
+    if (prdFile) fd.append("prd_file", prdFile);
+
+    const response = await fetch("/api/ingest", { method: "POST", body: fd });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || "Ingest failed.");
+    }
+    const stats: IngestStats = await response.json();
+    if (stats.warnings?.length) {
+      showToast(stats.warnings[0], "info");
+    }
+    return stats;
   };
 
   // Step 1: Discover Intents
@@ -490,6 +514,7 @@ export default function App() {
             {currentStep === 1 && (
               <DataIngestionTab
                 onDiscover={handleDiscover}
+                onIngest={handleIngest}
                 ruleText={intentRule}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");

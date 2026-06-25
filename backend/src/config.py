@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = 50000
     chunk_overlap_tokens: int = 500
 
+    # LLM model ids (cấu hình được qua .env)
+    gemini_model: str = "gemini-2.5-flash"
+
+    # Gap analysis / IntentComparator
+    embedding_model: str = "models/gemini-embedding-001"
+    match_high: float = 0.85  # sim >= high → auto match
+    match_low: float = 0.55  # sim <= low → auto khác; ở giữa → LLM chấm
+
     model_config = {"env_file": ".env", "env_prefix": ""}
 
 

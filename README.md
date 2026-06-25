@@ -166,7 +166,8 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux/Mac
 
-pip install -r backend/requirements.txt
+# pip install -r backend/requirements.txt
+pip install -r requirements.txt
 cp .env.example .env            # Điền API keys
 
 # Chạy backend
