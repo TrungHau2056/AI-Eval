@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from src.crawlers.facebook_crawler import FacebookCrawler
 from src.crawlers.threads_crawler import ThreadsCrawler
+from src.crawlers.tiktok_crawler import TiktokCrawler
 from src.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/crawl", tags=["crawl"])
@@ -61,6 +62,27 @@ class ThreadsCrawlRequest(BaseModel):
 
 class ThreadsCrawlResponse(BaseModel):
     """Response cho crawl endpoint."""
+    success: bool
+    platform: str
+    keywords: list[str]
+    raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
+    raw_content_length: int = Field(description="Tổng số ký tự raw content")
+    raw_content: str = Field(description="Toàn bộ raw content đã crawl")
+    intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
+    error: Optional[str] = None
+
+class TiktokCrawlRequest(BaseModel):
+    """Request body cho POST /api/crawl/tiktok."""
+    platform: str = Field(default="tiktok", description="Platform identifier")
+    domain: str = Field(default="", description="Business domain / ngành hàng")
+    keywords: list[str] = Field(..., min_length=1, description="Danh sách keywords cần crawl")
+    apify_token: Optional[str] = Field(default=None, description="Apify API token")
+    search_limit: int = Field(default=20, ge=1, le=50)
+    model: Optional[str] = Field(default=None, description="LLM model name")
+    api_key: Optional[str] = Field(default=None, description="LLM API key")
+
+class TiktokCrawlResponse(BaseModel):
+    """Response cho tiktok crawl endpoint."""
     success: bool
     platform: str
     keywords: list[str]
@@ -207,9 +229,74 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
     )
 
 # ---------------------------------------------------------------------------
+# TikTok Endpoint
+# ---------------------------------------------------------------------------
+@router.post("/tiktok", response_model=TiktokCrawlResponse)
+async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
+    """
+    Crawl TikTok qua Apify → trả raw content (+ optional IntentAgent analysis).
+    """
+    token = req.apify_token or getattr(settings, "apify_token", "") or ""
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="apify_token is required — gửi trong request body hoặc set APIFY_TOKEN trong .env",
+        )
+    try:
+        crawler = TiktokCrawler(
+            apify_token=token,
+            search_limit=req.search_limit,
+        )
+        raw_content = await crawler.run(keywords=req.keywords)
+    except Exception as exc:
+        logger.exception("Crawl failed")
+        return TiktokCrawlResponse(
+            success=False,
+            platform=req.platform,
+            keywords=req.keywords,
+            raw_content_preview="",
+            raw_content_length=0,
+            raw_content="",
+            error=f"Crawl error: {exc}",
+        )
+    
+    intents = None
+    try:
+        from src.pipeline.intent_extractor import IntentAgent
+        from src.models.schemas import RawInput
+        from src.llm.factory import create_llm_client
+
+        model = req.model or settings.default_model
+        api_key = req.api_key
+        if not api_key:
+            api_key = settings.openai_api_key if model == "openai" else settings.gemini_api_key
+
+        if not api_key:
+            logger.warning("No API key configured for model %s. Skipping IntentAgent.", model)
+        else:
+            llm = create_llm_client(model, api_key)
+            agent = IntentAgent(llm, max_chunk_tokens=settings.chunk_max_tokens)
+            raw_input = RawInput(content=raw_content, domain=req.domain, source_type="tiktok")
+            intents = await agent.run(raw_input)
+    except ImportError as exc:
+        logger.warning("IntentAgent not available: %s", exc)
+    except Exception as exc:
+        logger.warning("IntentAgent failed: %s", exc)
+        
+    return TiktokCrawlResponse(
+        success=True,
+        platform=req.platform,
+        keywords=req.keywords,
+        raw_content_preview=raw_content[:500],
+        raw_content_length=len(raw_content),
+        raw_content=raw_content,
+        intents=intents,
+    )
+
+# ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
 @router.get("/health")
 async def crawl_health():
     """Kiểm tra crawl module hoạt động."""
-    return {"status": "ok", "module": "crawl", "supported_platforms": ["facebook", "threads"]}
+    return {"status": "ok", "module": "crawl", "supported_platforms": ["facebook", "threads", "tiktok"]}
