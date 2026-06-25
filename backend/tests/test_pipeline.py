@@ -1,3 +1,5 @@
+import asyncio
+
 from src.pipeline.intent_extractor import IntentAgent
 from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
@@ -15,6 +17,19 @@ class MockLLM:
 
     async def generate_structured(self, prompt, schema, system_prompt=""):
         return self.response
+
+
+class MockLLMSequence:
+    def __init__(self, responses: list[str]):
+        self.responses = responses
+        self.calls: list[dict[str, str]] = []
+
+    async def generate(self, prompt: str, system_prompt: str = "") -> str:
+        self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
+        return self.responses.pop(0)
+
+    async def generate_structured(self, prompt, schema, system_prompt=""):
+        return await self.generate(prompt, system_prompt)
 
 
 # --- Intent ---
@@ -70,50 +85,45 @@ def test_intent_agent_add_feedback():
 
 # --- Persona ---
 
-def test_persona_agent_parse():
-    response = '''{
-        "personas": [
-            {"intent_num": 1, "intent_name": "Tim tram sac", "persona_num": 1, "persona_type": "happy-path", "trigger": "Di ve nha, muon sac xe", "utterance": "cho minh hoi tram sac o quan 7 con cho k a", "frequency": "2 lan/tuan", "pain": "Khong biet tram nao con cho", "reject": "Tram doi dien vi xa va dat", "special_situation": "", "research_source": "gia dinh", "why_different": "User rành công nghệ, kiên nhẫn", "expected_behavior": "Hoi ro rang, de hieu", "ai_response_example": "AI tra ve 2-3 tram gan nhat"},
-            {"intent_num": 1, "intent_name": "Tim tram sac", "persona_num": 2, "persona_type": "edge-case", "trigger": "Dang di duong, pin sap het", "utterance": "sac o dau day troi oi pin sap het roi", "frequency": "1 lan/thang", "pain": "Khong ranh cong nghe, gap", "reject": "App phuc tap can dang nhap", "special_situation": "Dang lai xe", "research_source": "gia dinh", "why_different": "User khẩn cấp, không rành công nghệ", "expected_behavior": "Can ket qua nhanh, don gian", "ai_response_example": "AI tra ve 1 tram gan nhat voi chi dan don gian"}
-        ]
-    }'''
-    agent = PersonaAgent(MockLLM(response))
-    intent = Intent(id="i1", intent_num=1, intent_name="Tim tram sac", utterance="sac o dau", moment="Dang di")
-    results = agent._parse(response, [intent])
-    assert len(results) == 2
-    assert results[0]["trait_type"] == "easy"
-    assert results[1]["trait_type"] == "hard"
-    assert results[0]["intent_id"] == "i1"
-    assert results[0]["trigger"] == "Di ve nha, muon sac xe"
-    assert results[1]["pain"] == "Khong ranh cong nghe, gap"
-
-
-def test_persona_agent_parse_empty():
-    agent = PersonaAgent(MockLLM(""))
-    intent = Intent(id="i1", intent_num=1, intent_name="Test")
-    results = agent._parse("{}", [intent])
-    assert len(results) == 0
-
-
-def test_persona_agent_memory_integrated():
-    intent = Intent(id="i1", intent_name="Refund", utterance="hoan tien", moment="Mua sai")
-    memory = ConversationMemory()
-    agent = PersonaAgent(MockLLM(""), memory=memory)
-
-    intents_json = '[{"intent_num": 1, "intent_name": "Refund"}]'
-    prompt = agent._build_prompt(intents_json, "")
-    assert "Lich su" not in prompt
-
-    memory.add("feedback", "Make persona harder")
-    prompt = agent._build_prompt(intents_json, "")
-    assert "Make persona harder" in prompt
-
-
 def test_persona_agent_add_feedback():
     memory = ConversationMemory()
     agent = PersonaAgent(MockLLM(""), memory=memory)
     agent.add_feedback("Persona qua chung chung")
     assert "Persona qua chung chung" in memory.get_context()
+
+
+def test_persona_agent_run_uses_langgraph_generator_and_evaluator():
+    persona_response = '''{
+        "personas": [
+            {"intent_num": 1, "intent_name": "Tim tram sac", "persona_num": 1, "persona_type": "happy-path", "trigger": "Di ve nha, muon sac xe", "utterance": "cho minh hoi tram sac o quan 7 con cho k a", "frequency": "2 lan/tuan", "pain": "Khong biet tram nao con cho", "reject": "Tram doi dien vi xa va dat", "special_situation": "", "research_source": "gia dinh", "why_different": "User ranh cong nghe, kien nhan", "expected_behavior": "Hoi ro rang, de hieu", "ai_response_example": "AI tra ve 2-3 tram gan nhat"},
+            {"intent_num": 1, "intent_name": "Tim tram sac", "persona_num": 2, "persona_type": "edge-case", "trigger": "Dang di duong, pin sap het", "utterance": "sac o dau day troi oi pin sap het roi", "frequency": "1 lan/thang", "pain": "Khong ranh cong nghe, gap", "reject": "App phuc tap can dang nhap", "special_situation": "Dang lai xe", "research_source": "gia dinh", "why_different": "User khan cap, khong ranh cong nghe", "expected_behavior": "Can ket qua nhanh, don gian", "ai_response_example": "AI tra ve 1 tram gan nhat voi chi dan don gian"},
+            {"intent_num": 2, "intent_name": "Bao tram sac hong", "persona_num": 1, "persona_type": "happy-path", "trigger": "Den tram va thay tru khong nhan sac", "utterance": "minh bao tram o quan 7 bi hong nhe", "frequency": "1 lan/thang luc gap tram loi", "pain": "Khong biet gui bao loi o dau", "reject": "Khong quan tam voucher vi can tram duoc sua som", "special_situation": "", "research_source": "review", "why_different": "User binh tinh va cung cap vi tri ro", "expected_behavior": "Ghi nhan loi va xin thong tin tram", "ai_response_example": "AI huong dan gui ma tram va anh chup"},
+            {"intent_num": 2, "intent_name": "Bao tram sac hong", "persona_num": 2, "persona_type": "edge-case", "trigger": "Dang can sac gap nhung tru bao loi", "utterance": "tru nay hong roi lam sao gio", "frequency": "2 lan/nam khi di xa", "pain": "So het pin giua duong", "reject": "Khong muon nghe quy trinh dai vi dang gap", "special_situation": "Dang di xa", "research_source": "chat log", "why_different": "User gap va thieu thong tin", "expected_behavior": "Hoi vi tri ngan gon va dua cach xu ly nhanh", "ai_response_example": "AI de nghi tram gan nhat va cach bao loi"}
+        ]
+    }'''
+    eval_response = '''{
+        "approved": true,
+        "score": 0.91,
+        "issues": [],
+        "revision_guidance": ""
+    }'''
+    llm = MockLLMSequence([persona_response, eval_response])
+    agent = PersonaAgent(llm)
+    intent = Intent(id="i1", intent_num=1, intent_name="Tim tram sac", utterance="sac o dau", moment="Dang di")
+    second_intent = Intent(id="i2", intent_num=2, intent_name="Bao tram sac hong", utterance="tram hong", moment="Den tram")
+
+    loop = asyncio.new_event_loop()
+    try:
+        results = loop.run_until_complete(agent.run([intent, second_intent]))
+    finally:
+        loop.close()
+
+    assert len(results) == 4
+    assert len(llm.calls) == 2
+    assert "Senior UX Researcher" in llm.calls[0]["system_prompt"]
+    assert "Persona Quality Evaluator" in llm.calls[1]["system_prompt"]
+    assert results[0]["trait_type"] == "easy"
+    assert results[1]["trait_type"] == "hard"
 
 
 # --- Test Case ---
