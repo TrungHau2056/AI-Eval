@@ -30,8 +30,8 @@ class FacebookCrawlRequest(BaseModel):
     # Apify config — override từ request, fallback sang .env
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
-    search_limit: int = Field(default=5, ge=1, le=50)
-    posts_limit: int = Field(default=5, ge=1, le=50)
+    search_limit: int = Field(default=20, ge=1, le=50)
+    posts_limit: int = Field(default=20, ge=1, le=50)
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
@@ -53,8 +53,8 @@ class ThreadsCrawlRequest(BaseModel):
     # Apify config — override từ request, fallback sang .env
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
-    search_limit: int = Field(default=5, ge=1, le=50)
-    posts_limit: int = Field(default=5, ge=1, le=50)
+    search_limit: int = Field(default=20, ge=1, le=50)
+    posts_limit: int = Field(default=20, ge=1, le=50)
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")

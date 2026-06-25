@@ -22,8 +22,8 @@ class FacebookCrawler(BaseCrawler):
         self,
         apify_token: str,
         autocomplete_limit: int = 5,
-        search_limit: int = 5,
-        posts_limit: int = 5,
+        search_limit: int = 20,
+        posts_limit: int = 20,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
