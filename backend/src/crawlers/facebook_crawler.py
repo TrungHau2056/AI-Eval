@@ -2,32 +2,35 @@
 FacebookCrawler — crawl Facebook qua 3 Apify actors theo pipeline:
     1. Google Autocomplete  →  mở rộng keywords thành nhiều search queries
     2. Facebook Search      →  tìm bài viết Facebook theo từng query
-    3. Facebook Posts       →  scrape nội dung đầy đủ + comments từ URLs
-Output là 1 string formatted sẵn sàng cho IntentAgent.
+    3. Facebook Posts       →  scrape nội dung đầy đủ từ các URLs
+Output là JSON chứa danh sách bài viết đã được làm sạch 
+(chỉ giữ lại link, liked, content) để tối ưu input cho AI (IntentAgent).
+Actor schemas verified từ Apify docs chính thức.
 """
 from __future__ import annotations
+import json
 import logging
 from typing import Any
 from src.crawlers.base import BaseCrawler
 logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
-# Actor IDs (Apify Store)
+# Actor IDs — dùng ~ separator cho Apify REST API
 # ---------------------------------------------------------------------------
-AUTOCOMPLETE_ACTOR = "dainins/google-autocomplete-scraper"
-SEARCH_ACTOR = "alien_force/facebook-search-scraper"
-POSTS_ACTOR = "apify/facebook-posts-scraper"
+AUTOCOMPLETE_ACTOR = "automation-lab~google-autocomplete-scraper"
+SEARCH_ACTOR = "scraper_one~facebook-posts-search"
+POSTS_ACTOR = "apify~facebook-posts-scraper"
 class FacebookCrawler(BaseCrawler):
     """Pipeline crawl Facebook: autocomplete → search → scrape."""
     def __init__(
         self,
         apify_token: str,
         autocomplete_limit: int = 5,
-        search_limit: int = 5,
-        posts_limit: int = 5,
+        search_limit: int = 20,       # Tăng limit để đạt coverage lớn
+        posts_limit: int = 20,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
-        self.search_limit = search_limit
+        self.search_limit = max(search_limit, 10)
         self.posts_limit = posts_limit
     # ==================================================================
     # Step 1 — Google Autocomplete
@@ -37,47 +40,27 @@ class FacebookCrawler(BaseCrawler):
         keyword: str,
         limit: int | None = None,
     ) -> list[str]:
-        """
-        Gọi Google Autocomplete Scraper để mở rộng 1 keyword
-        thành nhiều search queries.
-        Actor: dainins/google-autocomplete-scraper
-        Input schema:
-            {
-                "queries": ["keyword"],
-                "maxResults": 5,
-                "languageCode": "vi",
-                "countryCode": "vn"
-            }
-        Output: [{"query": "...", "results": ["suggestion1", ...]}]
-        """
         limit = limit or self.autocomplete_limit
         run_input: dict[str, Any] = {
-            "queries": [keyword],
-            "maxResults": limit,
-            "languageCode": "vi",
-            "countryCode": "vn",
+            "keywords": [keyword],
+            "language": "vi",
+            "country": "vn",
+            "maxDepth": 1,
+            "maxSuggestionsPerKeyword": limit,
+            "appendAlphabet": False,
         }
         try:
             items = await self._run_actor(AUTOCOMPLETE_ACTOR, run_input)
         except Exception as exc:
             logger.error("Autocomplete failed for '%s': %s", keyword, exc)
-            return [keyword]          # fallback: dùng chính keyword gốc
-        # Parse suggestions — thử nhiều field names để đảm bảo tương thích
+            return [keyword]
         suggestions: list[str] = []
         for item in items:
-            results = (
-                item.get("results")
-                or item.get("suggestions")
-                or item.get("autocomplete")
-                or []
-            )
-            if isinstance(results, list):
-                for r in results:
-                    text = r if isinstance(r, str) else r.get("value", r.get("text", ""))
-                    if text and text not in suggestions:
-                        suggestions.append(text)
+            text = item.get("suggestion", "").strip()
+            if text and text not in suggestions:
+                suggestions.append(text)
         if not suggestions:
-            suggestions = [keyword]    # fallback
+            suggestions = [keyword]
         logger.info("Autocomplete '%s' → %d queries: %s", keyword, len(suggestions), suggestions[:5])
         return suggestions[:limit]
     # ==================================================================
@@ -88,22 +71,11 @@ class FacebookCrawler(BaseCrawler):
         query: str,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Tìm bài viết Facebook bằng keyword.
-        Actor: alien_force/facebook-search-scraper
-        Input schema:
-            {
-                "keyword": "search query",
-                "search_type": "posts",
-                "max_posts": 5
-            }
-        Output: list of post objects (có url, text, author…)
-        """
-        limit = limit or self.search_limit
+        limit = max(limit or self.search_limit, 10)
         run_input: dict[str, Any] = {
-            "keyword": query,
-            "search_type": "posts",
-            "max_posts": limit,
+            "query": query,
+            "resultsCount": limit,
+            "searchType": "top"
         }
         try:
             items = await self._run_actor(SEARCH_ACTOR, run_input)
@@ -119,181 +91,91 @@ class FacebookCrawler(BaseCrawler):
         self,
         urls: list[str],
     ) -> list[dict[str, Any]]:
-        """
-        Scrape nội dung đầy đủ (text + comments) từ list URLs.
-        Actor: apify/facebook-posts-scraper
-        Input schema:
-            {
-                "startUrls": [{"url": "https://..."}],
-                "resultsLimit": 5
-            }
-        Output: list of post objects với text, comments, likes …
-        """
         if not urls:
             return []
         start_urls = [{"url": u} for u in urls]
         run_input: dict[str, Any] = {
             "startUrls": start_urls,
-            "resultsLimit": self.posts_limit,
+            "resultsLimit": self.posts_limit * len(urls),
         }
         try:
-            items = await self._run_actor(POSTS_ACTOR, run_input)
+            # Chờ lâu hơn vì loop qua nhiều URLs sẽ mất thời gian
+            items = await self._run_actor(POSTS_ACTOR, run_input, wait_secs=900)
         except Exception as exc:
             logger.error("Scrape posts failed: %s", exc)
             return []
-        logger.info("Scraped %d posts from %d URLs.", len(items), len(urls))
-        return items
+        valid_items = [i for i in items if "error" not in i]
+        logger.info("Scraped %d valid posts from %d URLs.", len(valid_items), len(urls))
+        return valid_items
     # ==================================================================
     # Orchestrator — chạy toàn bộ pipeline
     # ==================================================================
     async def run(self, keywords: list[str]) -> str:
         """
         Full pipeline:
-            keywords → autocomplete → search → scrape → formatted string
-        Nếu Step 3 (scrape_posts) không trả kết quả, fallback sang
-        content từ Step 2 (search_posts) — vì search thường đã có text.
+            keywords → autocomplete → search → scrape → clean_data → JSON string
+        Đảm bảo loop hết qua toàn bộ links để đạt coverage lớn nhất.
         """
-        all_posts: list[dict[str, Any]] = []
+        all_urls: list[str] = []
+        fallback_search_items: list[dict[str, Any]] = []
         for keyword in keywords:
             logger.info("=" * 60)
             logger.info("Processing keyword: '%s'", keyword)
             # ---- Step 1: Mở rộng keyword ----
             queries = await self.get_autocomplete(keyword)
-            # ---- Step 2: Search Facebook cho mỗi query ----
-            search_results: list[dict[str, Any]] = []
+            # ---- Step 2: Search Facebook cho TẤT CẢ queries ----
             for query in queries:
-                results = await self.search_posts(query)
-                search_results.extend(results)
-            if not search_results:
-                logger.warning("No search results for keyword '%s' — skipping.", keyword)
-                continue
-            # ---- Thu thập URLs từ search results ----
-            urls: list[str] = []
-            for item in search_results:
-                url = (
-                    item.get("url")
-                    or item.get("postUrl")
-                    or item.get("link")
-                    or ""
-                )
-                if url and url.startswith("http") and url not in urls:
-                    urls.append(url)
-            # ---- Step 3: Deep scrape posts ----
-            if urls:
-                scraped = await self.scrape_posts(urls)
-                if scraped:
-                    all_posts.extend(scraped)
-                    continue   # deep scrape thành công → dùng data này
-            # ---- Fallback: dùng search results nếu scrape trống ----
-            logger.info("Falling back to search results for keyword '%s'.", keyword)
-            all_posts.extend(search_results)
+                search_results = await self.search_posts(query)
+                fallback_search_items.extend(search_results)
+                
+                for item in search_results:
+                    url = item.get("url") or item.get("post_url") or ""
+                    if url.startswith("http") and url not in all_urls:
+                        all_urls.append(url)
+        if not all_urls:
+            logger.warning("No search results found for any keywords.")
+            return json.dumps([], ensure_ascii=False)
+        logger.info("Total unique URLs found to scrape: %d", len(all_urls))
+        # ---- Step 3: Deep scrape posts cho TOÀN BỘ URLs ----
+        all_scraped_items = await self.scrape_posts(all_urls)
+        # Fallback: Nếu scrape deep thất bại do rate limit, dùng luôn data từ bước search
+        if not all_scraped_items and fallback_search_items:
+            logger.info("Falling back to search results data due to empty scrape results.")
+            all_scraped_items = fallback_search_items
         # ---- Format output ----
-        return self._format_output(all_posts)
+        cleaned_data = self._clean_data(all_scraped_items)
+        return json.dumps(cleaned_data, indent=2, ensure_ascii=False)
     # ==================================================================
-    # Format helpers
+    # Data Cleaning (Chỉ giữ lại link, liked, content)
     # ==================================================================
-    @staticmethod
-    def _extract_text(post: dict[str, Any]) -> str:
-        """Trích text chính từ post — thử nhiều field names."""
-        return (
-            post.get("text")
-            or post.get("postText")
-            or post.get("message")
-            or post.get("content")
-            or post.get("body")
-            or ""
-        ).strip()
-    @staticmethod
-    def _extract_url(post: dict[str, Any]) -> str:
-        """Trích URL từ post."""
-        return (
-            post.get("url")
-            or post.get("postUrl")
-            or post.get("link")
-            or post.get("permalink")
-            or "N/A"
-        )
-    @staticmethod
-    def _extract_comments(post: dict[str, Any]) -> list[str]:
-        """Trích danh sách comment texts từ post."""
-        comments_raw = post.get("comments") or post.get("topComments") or []
-        comments: list[str] = []
-        if isinstance(comments_raw, list):
-            for c in comments_raw:
-                if isinstance(c, str):
-                    txt = c.strip()
-                elif isinstance(c, dict):
-                    txt = (
-                        c.get("text")
-                        or c.get("message")
-                        or c.get("body")
-                        or c.get("comment_text")
-                        or ""
-                    ).strip()
-                else:
-                    txt = ""
-                if txt:
-                    comments.append(txt)
-        return comments
-    @staticmethod
-    def _extract_author(post: dict[str, Any]) -> str:
-        """Trích tên tác giả."""
-        author = (
-            post.get("user")
-            or post.get("userName")
-            or post.get("author")
-            or post.get("pageName")
-            or ""
-        )
-        if isinstance(author, dict):
-            author = author.get("name") or author.get("username") or ""
-        return str(author).strip()
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+    def _clean_data(self, raw_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Format list posts thành 1 string sạch cho IntentAgent.
-        Format mỗi post:
-            ═══════════════════════════════════════
-            [POST] <url>
-            Author: <author>
-            ───────────────────────────────────────
-            <post text>
-            ───────────────────────────────────────
-            [COMMENTS] (N comments)
-            • comment 1
-            • comment 2
-            ═══════════════════════════════════════
+        Làm sạch JSON thô.
+        Chỉ giữ lại đúng 3 trường: link, liked, content.
         """
-        if not posts:
-            return "[NO DATA] Không crawl được bài viết nào từ Facebook."
-        blocks: list[str] = []
-        seen_urls: set[str] = set()
-        for post in posts:
-            url = self._extract_url(post)
-            text = self._extract_text(post)
-            # Skip bài trùng URL hoặc rỗng nội dung
-            if not text:
-                continue
-            if url in seen_urls and url != "N/A":
-                continue
-            seen_urls.add(url)
-            author = self._extract_author(post)
-            comments = self._extract_comments(post)
-            lines = [
-                "═" * 50,
-                f"[POST] {url}",
-            ]
-            if author:
-                lines.append(f"Author: {author}")
-            lines.append("─" * 50)
-            lines.append(text)
-            if comments:
-                lines.append("─" * 50)
-                lines.append(f"[COMMENTS] ({len(comments)} comments)")
-                for c in comments[:10]:       # cap 10 comments per post
-                    lines.append(f"  • {c}")
-            lines.append("═" * 50)
-            blocks.append("\n".join(lines))
-        if not blocks:
-            return "[NO DATA] Crawl được posts nhưng tất cả đều rỗng nội dung."
-        header = f"[FACEBOOK CRAWL] Tổng cộng {len(blocks)} bài viết\n"
-        return header + "\n\n".join(blocks)
+        cleaned = []
+        seen_urls = set()
+        for item in raw_items:
+            url = item.get("url") or item.get("facebookUrl") or ""
+            content = item.get("text") or item.get("postText") or item.get("message") or ""
+            liked = (
+                item.get("reactionLikeCount") 
+                or item.get("likesCount") 
+                or item.get("topReactionsCount") 
+                or item.get("reactionsCount") 
+                or 0
+            )
+            
+            content = content.strip()
+            
+            # Chỉ lấy bài viết thực sự có nội dung và tránh trùng lặp
+            if url and content and url not in seen_urls:
+                seen_urls.add(url)
+                cleaned.append({
+                    "link": url,
+                    "liked": liked,
+                    "content": content
+                })
+                
+        logger.info("Cleaned data: %d items ready.", len(cleaned))
+        return cleaned
