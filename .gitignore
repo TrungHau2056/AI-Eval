@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.env
+*.egg-info/
+dist/
+build/
+.claude/
+
+backend/test_cases.csv
+backend/test_cases.md
