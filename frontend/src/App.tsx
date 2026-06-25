@@ -146,6 +146,39 @@ export default function App() {
     }
   };
 
+  // Discover Intents from Social Media Media Platform
+  const handleDiscoverSocial = async (platform: string, domain: string, isViral: boolean, keywords?: string[], ruleText?: string) => {
+    try {
+      const response = await fetch("/api/discover-social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, domain, isViral, keywords, ruleText }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to discover social intents.");
+      }
+
+      const result = await response.json();
+      
+      const statsRes = await fetch("/api/state");
+      const freshState = await statsRes.json();
+      setIntents(freshState.intents || []);
+
+      if (result.fallback) {
+        showToast(`Demo Mode: Extracted typical social intents for ${platform} (${domain}).`, "info");
+      } else {
+        showToast(`Successfully extracted ${result.intents.length} social intents for ${platform}!`, "success");
+      }
+
+      setCurrentStep(2); // Jump to curation screen automatically
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || "Social Intent discovery failed.", "error");
+    }
+  };
+
   // Step 2: Curation Matrix edits
   const handleUpdateIntent = (id: string, updated: Partial<Intent>) => {
     const updatedList = intents.map((item) => (item.id === id ? { ...item, ...updated } : item));
@@ -231,7 +264,6 @@ export default function App() {
           trigger: updatedPersona.trigger,
           utterance: updatedPersona.utterance,
           frequency: updatedPersona.frequency,
-          frequencyText: updatedPersona.frequencyText,
           pain: updatedPersona.pain,
           reject: updatedPersona.reject,
           expectedAIBehavior: updatedPersona.expectedAIBehavior,
@@ -490,6 +522,7 @@ export default function App() {
             {currentStep === 1 && (
               <DataIngestionTab
                 onDiscover={handleDiscover}
+                onDiscoverSocial={handleDiscoverSocial}
                 ruleText={intentRule}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");
