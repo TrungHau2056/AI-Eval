@@ -13,13 +13,13 @@ import json
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from .base import PersonaAgentLLMBase
+from src.llm.base import LLMClient
 
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-class OpenRouterClient(PersonaAgentLLMBase):
+class OpenRouterClient(LLMClient):
     """
     Client cho OpenRouter — wrapper trên OpenAI SDK, đổi base_url.
 

@@ -1,12 +1,39 @@
 """
-Prompt Templates cho Persona Agent
-====================================
-Tách biệt hoàn toàn khỏi src/prompts/templates.py của team chính.
-Persona agent có nhu cầu prompt khác: evaluate + improve loop.
+Prompt Templates cho AI Test Case Generator
 """
 
 # ============================================================
-# SYSTEM PROMPTS
+# INTENT EXTRACTION
+# ============================================================
+
+INTENT_SYSTEM_PROMPT = """Bạn là chuyên gia phân tích hành vi người dùng. Nhiệm vụ của bạn là đọc các phản hồi, comment thô của người dùng và xác định các Intent (Mục đích sử dụng).
+Mỗi Intent bao gồm:
+- context: Bối cảnh/tình huống của người dùng
+- goal: Mục tiêu mà người dùng muốn đạt được
+- evidence: Danh sách các câu/trích dẫn gốc từ text hỗ trợ cho Intent đó (giữ nguyên văn bản gốc)
+
+Lưu ý:
+- Gom nhóm các phản hồi tương tự thành chung 1 Intent
+- Mỗi Intent phải rõ ràng, không trùng lặp
+- Evidence phải là trích dẫn chính xác từ text gốc, không tự bịa"""
+
+INTENT_USER_PROMPT = """Phân tích đoạn text sau và liệt kê tất cả các Intent tiềm năng.
+Mỗi Intent gồm: context (bối cảnh), goal (mục tiêu), evidence (danh sách trích dẫn gốc hỗ trợ intent).
+
+---
+{raw_text}
+---
+
+Trả về JSON dạng:
+{{
+  "intents": [
+    {{"context": "...", "goal": "...", "evidence": ["trích dẫn 1", "trích dẫn 2"]}}
+  ]
+}}"""
+
+
+# ============================================================
+# PERSONA AGENT — GENERATION
 # ============================================================
 
 PERSONA_BUILDER_SYSTEM_PROMPT = """Bạn là chuyên gia xây dựng persona cho AI evaluation. Nhiệm vụ của bạn là tạo ra các persona người dùng chi tiết, chân thực để kiểm tra toàn diện chất lượng AI/chatbot.

@@ -7,10 +7,10 @@ import json
 import anthropic
 from pydantic import BaseModel
 
-from .base import PersonaAgentLLMBase
+from src.llm.base import LLMClient
 
 
-class AnthropicClient(PersonaAgentLLMBase):
+class AnthropicClient(LLMClient):
     """
     Client cho Anthropic API (claude-sonnet-4-6, claude-opus-*...).
 

@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: AI Test Case Gen",
+  "description": "Enterprise-grade AI-powered test case generator from user intent discovery and custom persona simulation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
