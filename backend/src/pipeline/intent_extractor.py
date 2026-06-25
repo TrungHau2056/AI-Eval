@@ -1,12 +1,15 @@
 import json
 import logging
-from typing import Any
+from typing import Any, TypedDict, Literal
+
+from langgraph.graph import END, START, StateGraph
 
 from src.chunking.text_chunker import chunk_text
 from src.llm.base import LLMClient
 from src.memory.base import BaseMemory
 from src.memory.conversation_memory import ConversationMemory
 from src.models.schemas import Intent, RawInput
+from src.observability.langfuse import capture_io_enabled, langfuse_observation
 
 logger = logging.getLogger(__name__)
 
@@ -66,53 +69,124 @@ Trả về JSON dạng:
 """
 
 
+class IntentState(TypedDict):
+    raw_input: RawInput
+    guidance: str
+    chunks: list[str]
+    current_chunk_idx: int
+    all_intents: list[dict[str, Any]]
+    final_intents: list[dict[str, Any]]
+
+
 class IntentAgent:
     def __init__(self, llm: LLMClient, memory: BaseMemory | None = None, max_chunk_tokens: int = 50000):
         self.llm = llm
         self.memory = memory or ConversationMemory()
         self.max_chunk_tokens = max_chunk_tokens
+        self.graph = self._build_graph()
 
-    async def run(self, raw_input: RawInput, guidance: str = "") -> list[dict[str, Any]]:
-        logger.info("IntentAgent.run() | input_length=%d | guidance=%s", len(raw_input.content), bool(guidance))
-        if guidance:
-            self.memory.add("user", guidance)
+    def _build_graph(self):
+        workflow = StateGraph(IntentState)
+        workflow.add_node("prepare_chunks", self._prepare_chunks_node)
+        workflow.add_node("extract_intents_chunk", self._extract_intents_chunk_node)
+        workflow.add_node("deduplicate_intents", self._deduplicate_intents_node)
 
-        chunks = chunk_text(raw_input.content, max_tokens=self.max_chunk_tokens)
-        logger.info("Chunked input into %d chunks (max_tokens=%d)", len(chunks), self.max_chunk_tokens)
-        all_intents: list[dict[str, Any]] = []
+        workflow.add_edge(START, "prepare_chunks")
+        workflow.add_edge("prepare_chunks", "extract_intents_chunk")
+        workflow.add_conditional_edges(
+            "extract_intents_chunk",
+            self._route_next_chunk,
+            ["extract_intents_chunk", "deduplicate_intents"]
+        )
+        workflow.add_edge("deduplicate_intents", END)
+        return workflow.compile()
 
-        for i, chunk in enumerate(chunks):
-            logger.info("Processing chunk %d/%d (length=%d)", i + 1, len(chunks), len(chunk))
-            prompt = self._build_prompt(chunk, guidance)
-            logger.info("Calling LLM.generate() for chunk %d ...", i + 1)
+    def _prepare_chunks_node(self, state: IntentState) -> dict[str, Any]:
+        raw_content = state["raw_input"].content
+        chunks = chunk_text(raw_content, max_tokens=self.max_chunk_tokens)
+        logger.info("IntentGraph | prepare_chunks | total_chunks=%d", len(chunks))
+        return {
+            "chunks": chunks,
+            "current_chunk_idx": 0,
+            "all_intents": [],
+            "final_intents": []
+        }
+
+    async def _extract_intents_chunk_node(self, state: IntentState) -> dict[str, Any]:
+        idx = state["current_chunk_idx"]
+        chunks = state["chunks"]
+        guidance = state["guidance"]
+        
+        chunk = chunks[idx]
+        logger.info("IntentGraph | extract_intents_chunk | chunk %d/%d (length=%d)", idx + 1, len(chunks), len(chunk))
+        
+        prompt = self._build_prompt(chunk, guidance)
+        
+        with langfuse_observation(
+            "intent-extractor-chunk",
+            as_type="generation",
+            model=str(getattr(self.llm, "model", self.llm.__class__.__name__)),
+            input=prompt if capture_io_enabled() else {"chunk_num": idx + 1, "chunk_len": len(chunk)},
+            metadata={"chunk_num": idx + 1, "total_chunks": len(chunks)},
+        ) as generation:
             raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
-            logger.info("LLM responded for chunk %d | response_length=%d", i + 1, len(raw))
             intents = self._parse(raw)
-            logger.info("Parsed %d intents from chunk %d", len(intents), i + 1)
-
-            self.memory.add("assistant", [it.get("intent_name", "") for it in intents])
-
-            all_intents.extend(intents)
-
-        result = self._deduplicate(all_intents)
-        logger.info("IntentAgent.run() done | total=%d | after_dedup=%d", len(all_intents), len(result))
-        return result
-
-    async def run_single(self, raw_input: RawInput, guidance: str = "") -> list[dict[str, Any]]:
-        logger.info("IntentAgent.run_single() | input_length=%d | guidance=%s", len(raw_input.content), bool(guidance))
-        if guidance:
-            self.memory.add("user", guidance)
-
-        prompt = self._build_prompt(raw_input.content, guidance)
-        logger.info("Calling LLM.generate() for single intent ...")
-        raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
-        logger.info("LLM responded | response_length=%d", len(raw))
-        intents = self._parse(raw)
-        logger.info("Parsed %d intents", len(intents))
+            logger.info("IntentGraph | extract_intents_chunk | parsed %d intents from chunk %d", len(intents), idx + 1)
+            
+            generation.update(
+                output=raw if capture_io_enabled() else {"intent_count": len(intents)}
+            )
 
         self.memory.add("assistant", [it.get("intent_name", "") for it in intents])
+        
+        updated_intents = list(state.get("all_intents", [])) + intents
+        return {
+            "all_intents": updated_intents,
+            "current_chunk_idx": idx + 1
+        }
 
-        return intents
+    def _deduplicate_intents_node(self, state: IntentState) -> dict[str, Any]:
+        all_intents = state["all_intents"]
+        result = self._deduplicate(all_intents)
+        logger.info("IntentGraph | deduplicate_intents | raw=%d | deduped=%d", len(all_intents), len(result))
+        return {
+            "final_intents": result
+        }
+
+    def _route_next_chunk(self, state: IntentState) -> Literal["extract_intents_chunk", "deduplicate_intents"]:
+        if state["current_chunk_idx"] < len(state["chunks"]):
+            return "extract_intents_chunk"
+        return "deduplicate_intents"
+
+    async def run(self, raw_input: RawInput, guidance: str = "") -> list[dict[str, Any]]:
+        logger.info("IntentAgent.run() via LangGraph | input_length=%d | guidance=%s", len(raw_input.content), bool(guidance))
+        if guidance:
+            self.memory.add("user", guidance)
+
+        with langfuse_observation(
+            "intent-extraction",
+            as_type="span",
+            input={"input_length": len(raw_input.content), "guidance_provided": bool(guidance)},
+            metadata={"stage": "intent_extraction", "architecture": "langgraph"},
+        ) as span:
+            initial_state: IntentState = {
+                "raw_input": raw_input,
+                "guidance": guidance,
+                "chunks": [],
+                "current_chunk_idx": 0,
+                "all_intents": [],
+                "final_intents": []
+            }
+            final_state = await self.graph.ainvoke(initial_state)
+            result = final_state.get("final_intents", [])
+            span.update(
+                output={"intent_count": len(result)}
+            )
+            return result
+
+    async def run_single(self, raw_input: RawInput, guidance: str = "") -> list[dict[str, Any]]:
+        logger.info("IntentAgent.run_single() via LangGraph | input_length=%d | guidance=%s", len(raw_input.content), bool(guidance))
+        return await self.run(raw_input, guidance)
 
     def add_feedback(self, feedback: str) -> None:
         self.memory.add("feedback", feedback)

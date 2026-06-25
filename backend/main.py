@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routers.frontend_api import router as frontend_router
+from src.observability.langfuse import flush_langfuse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +29,11 @@ app.include_router(frontend_router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.on_event("shutdown")
+def shutdown():
+    flush_langfuse()
 
 
 if __name__ == "__main__":
