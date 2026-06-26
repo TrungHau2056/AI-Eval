@@ -167,6 +167,9 @@ class FacebookCrawler(BaseCrawler):
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
+            # Giới hạn số URL deep-scrape đúng bằng posts_limit để tiết kiệm chi phí
+            urls = urls[: self.posts_limit]
+
             if urls:
                 scraped = await self.scrape_posts(urls)
                 if scraped:
@@ -176,7 +179,7 @@ class FacebookCrawler(BaseCrawler):
             logger.info("Falling back to search results for keyword '%s'.", keyword)
             all_posts.extend(search_results)
 
-        return self._format_output(all_posts)
+        return self._format_output(all_posts, limit=self.posts_limit)
 
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
@@ -258,7 +261,7 @@ class FacebookCrawler(BaseCrawler):
                 return int(val)
         return 0
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+    def _format_output(self, posts: list[dict[str, Any]], limit: int | None = None) -> str:
         if not posts:
             return "[]"
 
@@ -266,6 +269,8 @@ class FacebookCrawler(BaseCrawler):
         seen_urls: set[str] = set()
 
         for post in posts:
+            if limit is not None and len(cleaned_posts) >= limit:
+                break
             url = self._extract_url(post)
             text = self._extract_text(post)
             if not text:

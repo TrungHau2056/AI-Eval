@@ -1,271 +1,125 @@
 [
   {
-    "username": "simplygregster",
-    "isVerified": false,
-    "captionText": "Guess how far the Vinfast VF8 goes in the cold!",
-    "takenAtFormatted": "1734131309",
-    "likeCount": 11,
-    "directReplyCount": 12,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@simplygregster/post/DDiVOFOJXbF",
-    "comments": [
-      "275 to 285 km",
-      "I will also say 240km.",
-      "Tell us how cold! And how the climate control is set! And whether the windows are open! And how fast you are traveling! Because otherwise the question doesn’t make any sense!"
-    ]
-  },
-  {
-    "username": "shahmeer_dgaf9",
-    "isVerified": false,
-    "captionText": "LC V8 😶‍🌫️⚜️",
-    "takenAtFormatted": "1782375170",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@shahmeer_dgaf9/post/DaAHFHzkX1a",
-    "comments": []
-  },
-  {
-    "username": "b_shivam_co",
-    "isVerified": false,
-    "captionText": "#vinfast car #reelsvrial",
-    "takenAtFormatted": "1782365249",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@b_shivam_co/post/DZ_0J73iVsh",
-    "comments": []
-  },
-  {
-    "username": "graeme.hutchinson.52",
-    "isVerified": false,
-    "captionText": "My 1948 flathead V8 coupe Ute is stripped back and ready for its topcoat very soon",
-    "takenAtFormatted": "1781172940",
-    "likeCount": 20,
-    "directReplyCount": 1,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@graeme.hutchinson.52/post/DZcSAswmvmE",
-    "comments": [
-      "😝😝"
-    ]
-  },
-  {
-    "username": "el_pantera_75",
+    "username": "gray_deee",
     "isVerified": true,
-    "captionText": "#ford #petrolhead #maverick #racing #v8",
-    "takenAtFormatted": "1782362532",
-    "likeCount": 0,
-    "directReplyCount": 0,
+    "captionText": "Bener-bener cinta produk dalam negri 🇻🇳#vinfast",
+    "takenAtFormatted": "1758682912",
+    "likeCount": 726,
+    "directReplyCount": 186,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@el_pantera_75/post/DZ_u-T0jxlx",
-    "comments": []
-  },
-  {
-    "username": "ptla_05",
-    "isVerified": false,
-    "captionText": "CHỈ CÒN 5 NGÀY CUỐI CÙNG! 🔥\n⏰ Đừng bỏ lỡ cơ hội sở hữu xe điện VinFast với ưu đãi giá bán lên tới 3% trong chương trình MÙA HÈ RỰC RỠ.\n📅 Chương trình chỉ còn 5 ngày!\nĐặt cọc ngay hôm nay để không bỏ lỡ mức ưu đãi hấp dẫn trước khi kết thúc.\n📞 Inbox ngay hoặc liên hệ tư vấn để được báo giá và giữ ưu đãi sớm nhất!\nLh: 0962892523",
-    "takenAtFormatted": "1782362903",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@ptla_05/post/DZ_vr0QHR7X",
-    "comments": []
-  },
-  {
-    "username": "meganstarx1",
-    "isVerified": false,
-    "captionText": "Ferrari 812 Superfast❤️",
-    "takenAtFormatted": "1707999944",
-    "likeCount": 1781,
-    "directReplyCount": 4,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@meganstarx1/post/C3XjmOvKeqz",
+    "postUrl": "https://www.threads.net/@gray_deee/post/DO-Brttkj9L",
     "comments": [
-      "😍❤️🔥",
-      "💝💝💝💝💝💝",
-      "So nice"
+      "Masnya nggak tahu esemka yang pesen 6.000 unit? Masnya orang otomotif loh",
+      "Vietnam 10 taun ini dapat revolusi industri. Dan industriliasi... \n\nIndonesia dapat Jokowi Paket Gibran",
+      "Mereka udah jadi produsen, kita masih setia jadi konsumen 😅"
     ]
   },
   {
-    "username": "featherless",
+    "username": "duy.rom",
     "isVerified": false,
-    "captionText": "Taking the weather CarPlay widget for a spin 🌞",
-    "takenAtFormatted": "1730128641",
-    "likeCount": 225,
-    "directReplyCount": 26,
+    "captionText": "Mấy thằng hay chửi là mấy thằng ko có xe =))))\nTau vinno nè chửi đi hẹ hẹ",
+    "takenAtFormatted": "1763110536",
+    "likeCount": 79,
+    "directReplyCount": 14,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@featherless/post/DBrCvILPDKb",
+    "postUrl": "https://www.threads.net/@duy.rom/post/DRB-tdAE4M2",
     "comments": [
-      "what mapping app is that?",
-      "Can I get one for a charger?",
-      "Make for a vinfast vf8 please"
+      "Chả biết rẻ chỗ nào , đi chưa được 15km mà sm lấy 130k ko pít chém ko",
+      "Tự ép giá nhau thôi.",
+      "Lado họ đón khách Liên Khương về Đà Lạt vẫn 150k từ ngày xe xăng, cho tới khi mua xe điện."
     ]
   },
   {
-    "username": "ammarquez87",
+    "username": "chuyencua_chungyoung",
     "isVerified": false,
-    "captionText": "Make for a vinfast vf8 please",
-    "takenAtFormatted": "1730175993",
-    "likeCount": 1,
-    "directReplyCount": 1,
+    "captionText": "Vinfast VF8 đụng độ với Tesla Model 3 tại Mỹ\nCre: Bầu Thịnh - Vòng Quanh Nước Mỹ",
+    "takenAtFormatted": "1727581805",
+    "likeCount": 232,
+    "directReplyCount": 66,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@ammarquez87/post/DBsdDeORytc",
+    "postUrl": "https://www.threads.net/@chuyencua_chungyoung/post/DAfJCEgSXgG",
     "comments": [
-      "Email me your make/model/year to jeff@featherless.design so I can follow up when we start onboarding!"
+      "túi khí tesla bền vl =)))",
+      "Vết lõm ở đầu vin là bị đẩy vào con xe đang đỗ chứ k phải bị tông cơ mới ác 🤣xe cứng",
+      "Vinfaat tốt nhỉ? Vậy tại sao phải nâng khống doanh thu tại Mỹ để bị kiện 🥲 thế ng Mỹ họ tiêu dùng ko thông thái rùiii ☺️"
     ]
   },
   {
-    "username": "hphuc1207",
+    "username": "rafael_mangiafico",
     "isVerified": false,
-    "captionText": "🚗⚡ VINFAST – ƯU ĐÃI NGẮN HẠN SẮP KẾT THÚC! 🌱\n\n⏰ Dành riêng cho các dòng xe: VF 5, Limo Green, MPV 7\n\n☀️ MÙA HÈ RỰC RỠ\n🔥 Giảm ngay 3%\n\n🎁 TẶNG BẢO HIỂM VẬT CHẤT\n💰 Hoặc quy đổi tiền mặt 15 triệu đồng\n\n🚘 Cơ hội sở hữu xe VinFast với những ưu đãi hấp dẫn đang đến hồi kết!\n\n⚡ Nhanh tay lựa chọn ngay hôm nay để không bỏ lỡ ưu đãi tốt nhất!\n\n📞 Liên hệ Em Phúc ngay hôm nay\nHoài Phúc VinFast\n📲 0938151875\n\n#VinFast #HoaiPhucVinFast #XeDienThongMinh #ManhLietViTuongLaiXanh #VinFast",
-    "takenAtFormatted": "1782360596",
-    "likeCount": 0,
+    "captionText": "Ferrari Spider F8 🕷️🕷️",
+    "takenAtFormatted": "1781544816",
+    "likeCount": 7,
     "directReplyCount": 0,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@hphuc1207/post/DZ_rSPBoC9O",
+    "postUrl": "https://www.threads.net/@rafael_mangiafico/post/DZnXO9mkWGP",
     "comments": []
   },
   {
-    "username": "evflyguy",
+    "username": "thuduyen.guudd",
     "isVerified": false,
-    "captionText": "Test drove a new ID.4, EV9, EV6, and Prologue over the last two days...",
-    "takenAtFormatted": "1725666136",
-    "likeCount": 135,
-    "directReplyCount": 89,
+    "captionText": "Mình là nữ, tài chính max 500 củ thì nên mua xe điện gì mọi người ơiiii 😝\nEm đi đường Hà Nội, về quê các thứ khoảng 60-70km ạ",
+    "takenAtFormatted": "1774790995",
+    "likeCount": 408,
+    "directReplyCount": 68,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@evflyguy/post/C_mDLxKS4YY",
+    "postUrl": "https://www.threads.net/@thuduyen.guudd/post/DWeFawPkqc-",
     "comments": [
-      "I like the Prologue. They have a great old classic color of teal available. It looks great.",
-      "Drive a vinfast vf8 or vf9",
-      "Don’t"
+      "Sale Vinfast nhìn thấy bài này thì tư vấn cho em với",
+      "Vf5 là lành nhất vì nó chả có gì để lỗi, nó cơ bản như con vios trc sinh ra để chạy dịch vụ ấy . 500 tr thừa sức mua vf5 mới r . Nhưng có tiền t vẫn vote mua vf6 plus có adas vào lái xe nhàn lắm.",
+      "Thêm ít tiền mua vf5 vf6. Chứ ngoài ra b dám mua xe TQ k. Geely EX2 vừa ra mắt 500 đó"
     ]
   },
   {
-    "username": "davidj__20",
+    "username": "h.huyen.93",
     "isVerified": false,
-    "captionText": "Drive a vinfast vf8 or vf9",
-    "takenAtFormatted": "1725718220",
-    "likeCount": 1,
-    "directReplyCount": 1,
+    "captionText": "Story của lão chồng sau hơn 6 tháng trải nghiệm VF8\nTrước có yêu hãng X giấu tên như vậy đâu nhờ 🤭",
+    "takenAtFormatted": "1767493901",
+    "likeCount": 40,
+    "directReplyCount": 5,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@davidj__20/post/C_nmhwkvn7a",
+    "postUrl": "https://www.threads.net/@h.huyen.93/post/DTEnULgEgY8",
     "comments": [
-      "Never had the opportunity."
+      "Đc anh idol của vợ làm FOH quá đỉnh…",
+      "Xời.. cứ p gọi là đỉnh của chópppp",
+      "Bạn ơi.. bạn hỏi đúng người nghèo có lối sống tài phiệt rồi🤣🤣🤣🤣"
     ]
   },
   {
-    "username": "lam.duc.tin",
+    "username": "khanhchannel.vn",
     "isVerified": false,
-    "captionText": "Giao xe Vinfast Limo Green\nTrả tiền 45 Tr nhận xe kinh doanh lợi nhuận thì còn xe nào bằng\nMến chúc anh chị kinh doanh thuận lợi rước thêm xe mới\n#limogreen\n#vinfastlimogreen\n#limogreenvinfast \n#muaxevindicungtin \n#xedien",
-    "takenAtFormatted": "1782357455",
+    "captionText": "VINFAST VF8 THẾ HỆ MỚI (VF8 ALL - NEW) #khanhchannel #vinfastvf8 #vinfast #khanhchannelworkshop",
+    "takenAtFormatted": "1782277032",
     "likeCount": 0,
     "directReplyCount": 0,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@lam.duc.tin/post/DZ_lSfuEhhk",
+    "postUrl": "https://www.threads.net/@khanhchannel.vn/post/DZ9L5TbkxuA",
     "comments": []
   },
   {
-    "username": "mrkool.hha",
-    "isVerified": false,
-    "captionText": "Cá nhân hoá Zgoo kiểu này thì đẹp quá. Có ai biết chỗ nào làm được kiểu này không chỉ tôi với. #Zgoo #Vinfast #MrKool",
-    "takenAtFormatted": "1782362147",
+    "username": "carguideph",
+    "isVerified": true,
+    "captionText": "How important is the Philippines to VinFast? Very.\nhttps://www.carguide.ph/2026/06/the-philippines-accounts-for-25-percent.html",
+    "takenAtFormatted": "1782432125",
     "likeCount": 0,
     "directReplyCount": 0,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@mrkool.hha/post/DZ_uPozATSp",
+    "postUrl": "https://www.threads.net/@carguideph/post/DaBzt0Nkx_z",
     "comments": []
   },
   {
-    "username": "giangnguyen0896",
+    "username": "tsglass435",
     "isVerified": false,
-    "captionText": "Chào các ￼Ty ngày mới\nV8 6.2L 420 Hp 624Nm 0-100km/h trong 6,8s\nVF President Limited Edition 2020 😍",
-    "takenAtFormatted": "1782357017",
-    "likeCount": 0,
-    "directReplyCount": 0,
+    "captionText": "So I finally got a big boy car I have always wanted my v8 manual and I jumped on it last night and I don regret it i absolutely love it",
+    "takenAtFormatted": "1774375044",
+    "likeCount": 442,
+    "directReplyCount": 82,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@giangnguyen0896/post/DZ_kdYOD7ta",
-    "comments": []
-  },
-  {
-    "username": "minhdat.vgreen",
-    "isVerified": false,
-    "captionText": "Trung tâm phát triển trạm sạc của VinFast - Công ty V-Green khu vực Miền Bắc cần thuê mặt bằng lắp tủ đổi pin của xe máy điện Vinfast:\nThu nhập: tối thiểu 600-800k/tháng/tủ hoặc tối đa 7% doanh thu (lắp tối đa 4 tủ~2tr4-3tr2/tháng)\n\nKích thước 1 tủ: 0,6m × 1m, cao 1,8m\n\nThanh toán: 3 tháng/lần, rõ ràng theo hợp đồng\n\nChi phí: V-Green lo toàn bộ (lắp đặt, vận hành, bảo trì, tiền điện)\n\nLắp đặt: không ảnh hưởng hoạt động hiện tại\n\nĐiện: dùng điện sinh hoạt hoặc 3 pha đều\n\nSđt liên hệ: 0869775884",
-    "takenAtFormatted": "1774081766",
-    "likeCount": 26,
-    "directReplyCount": 61,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@minhdat.vgreen/post/DWI8q5fkeRM",
+    "postUrl": "https://www.threads.net/@tsglass435/post/DWRsDeFFSyH",
     "comments": [
-      "Mình chỉ hỗ trợ từ tỉnh Nghệ An trở ra thôi nhé ạ",
-      "Hết chính sách vs trụ sạc oto r à b",
-      "Mặt bằng ở Nguyễn Khoái"
-    ]
-  },
-  {
-    "username": "osadomm",
-    "isVerified": false,
-    "captionText": "Love bro #fyp #charger #v8 #v6 #explore",
-    "takenAtFormatted": "1782364444",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@osadomm/post/DZ_yn0CjjNe",
-    "comments": []
-  },
-  {
-    "username": "thevonnielombardi",
-    "isVerified": false,
-    "captionText": "A V8 is a V8 but it ain’t shit if you don’t know how to drive it.",
-    "takenAtFormatted": "1780600960",
-    "likeCount": 149,
-    "directReplyCount": 53,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@thevonnielombardi/post/DZLPC94kt3Q",
-    "comments": [
-      "Cause who finna go back and forth with yall knowing my own driving habits and history",
-      "Naw it’s still a V8 wit a shitty driver",
-      "I got a v6 bmw that 💩 on v8s"
-    ]
-  },
-  {
-    "username": "vinfast_thai_nguyen",
-    "isVerified": false,
-    "captionText": "🌟 Ngày vui bàn giao xe! 🌟\nVinFast Thái Nguyên hân hạnh bàn giao VF6 Plus màu trắng cho gia đình cô Hiền - chú Trung hôm nay! ❤️\n🍀Chúc mừng cô chú đã chọn được chiếc xe đẹp, hiện đại và phù hợp với cả nhà.\nChúc cả nhà luôn bình an trên mọi nẻo đường, ngập tràn niềm vui và hạnh phúc bên nhau.\nCảm ơn cô chú đã tin tưởng và đồng hành cùng VinFast Minh Đạo! 💙\n☎️☎️0967 095 222",
-    "takenAtFormatted": "1782360866",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@vinfast_thai_nguyen/post/DZ_rzLHG3pa",
-    "comments": []
-  },
-  {
-    "username": "terjjo",
-    "isVerified": false,
-    "captionText": "VIP Transport Lamborghini Aventador 😉🥂🍾😍",
-    "takenAtFormatted": "1763958966",
-    "likeCount": 183,
-    "directReplyCount": 3,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@terjjo/post/DRbQ9g8Crtn",
-    "comments": [
-      "This is so cool is it yours or are you transporting it for someone",
-      "❤️lo amo 🏎️",
-      "Good day and a happy new week to you."
-    ]
-  },
-  {
-    "username": "ltt.27vts",
-    "isVerified": false,
-    "captionText": "Trong khi ở quê nhà thì nói tới nói lui, thì ở Mỹ dân Mễ mua Vinfast VF8 chạy đầy đường.\n\nCó thấy họ chê đâu.",
-    "takenAtFormatted": "1775017267",
-    "likeCount": 168,
-    "directReplyCount": 147,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@ltt.27vts/post/DWk0_JQDuHY",
-    "comments": [
-      "O đau ban sao mình không thay a",
-      "Xe xăng Vin thì k biết,chứ chạy xe điện Vin chán lắm nha,cái máy lạnh chỉnh tới chỉnh lui,AI thì có mỗi câu lệnh bật tắt máy lạnh,tui thuê đi thử để biết ok hông mới mua,trải nghiệm tệ tui quay xe mua BYD đc 1 năm,ổn áp.",
-      "Chỉ thấy ngoài đời 1 chiếc mà nói lên nhiều điều như vậy hả?"
+      "i dont like american cars but im proud u got a stick shift v8 my nigga u a real man",
+      "don’t let ppl talk shit on it, nice car man enjoy it",
+      "Congrats brother! Nothing like the feeling of getting the car you’ve had your eyes on."
     ]
   }
 ]
