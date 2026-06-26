@@ -122,6 +122,8 @@ class PipelineState(BaseModel):
     raw_input: RawInput | None = None
     # PRD-as-source: content để mine thành prd_intents (đối chiếu với data)
     raw_prd_content: str = ""
+    # Crawled social content (raw posts JSON) — stored on crawl-only, consumed by /api/discover
+    raw_social_content: str = ""
     # Frontend-facing state
     api_key: str = ""
     domain: str = "qa-env-01.local"

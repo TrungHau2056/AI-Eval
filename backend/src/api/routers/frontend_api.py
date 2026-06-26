@@ -316,12 +316,18 @@ def discover_intents(req: DiscoverRequest):
     logger.info("POST /api/discover | logsText_length=%d | ruleText=%s", len(req.logsText), bool(req.ruleText))
     state = get_state()
 
-    # Data content: paste-text ưu tiên; nếu rỗng → dùng state.raw_input đã ingest.
+    # Data content from all available sources: paste-text (ưu tiên) hoặc raw_input đã
+    # ingest, GỘP THÊM dữ liệu social đã crawl (state.raw_social_content). Không gắn nhãn
+    # nguồn ở vòng này — chỉ nối nội dung lại để mine intents.
+    parts: list[str] = []
     if req.logsText and req.logsText.strip():
         state.raw_input = RawInput(source_type="text", content=req.logsText)
-        data_content = req.logsText
-    else:
-        data_content = state.raw_input.content if state.raw_input else ""
+        parts.append(req.logsText)
+    elif state.raw_input and state.raw_input.content:
+        parts.append(state.raw_input.content)
+    if state.raw_social_content and state.raw_social_content.strip():
+        parts.append(state.raw_social_content)
+    data_content = "\n\n".join(p for p in parts if p and p.strip())
 
     prd_content = state.raw_prd_content
     if not data_content.strip() and not prd_content.strip():

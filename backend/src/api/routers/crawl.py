@@ -10,6 +10,7 @@ Luồng:
     5. Trả kết quả (giống /api/discover)
 """
 from __future__ import annotations
+import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException
@@ -75,6 +76,34 @@ async def _mine_and_store(
     state.internal_intents = [Intent(**r) for r in results]
     crawl_logs.append(f"Extracted {len(fe_intents)} intents from crawled content.")
     return [i.model_dump() for i in fe_intents], crawl_logs
+
+
+def _parse_posts(raw_content: str, platform: str) -> list[dict]:
+    """Parse the crawler's JSON output into normalized rows for the FE results table.
+
+    All crawlers emit json.dumps of objects with keys: username, captionText,
+    takenAtFormatted, likeCount, directReplyCount, postUrl, comments. Tolerant of
+    empty/non-JSON content → returns [].
+    """
+    try:
+        items = json.loads(raw_content)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(items, list):
+        return []
+    posts: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        posts.append({
+            "platform": platform,
+            "url": it.get("postUrl") or it.get("url") or "",
+            "postingDate": it.get("takenAtFormatted") or "",
+            "text": it.get("captionText") or it.get("text") or "",
+            "likes": it.get("likeCount") or 0,
+            "commentsCount": it.get("directReplyCount") or 0,
+        })
+    return posts
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -91,6 +120,8 @@ class FacebookCrawlRequest(BaseModel):
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
+    # Crawl-only by default; intents come from /api/discover. Set True for legacy behavior.
+    extract_intents: bool = Field(default=False, description="Run IntentAgent on crawled content")
 class FacebookCrawlResponse(BaseModel):
     """Response cho crawl endpoint."""
     success: bool
@@ -99,6 +130,7 @@ class FacebookCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
+    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -115,6 +147,8 @@ class ThreadsCrawlRequest(BaseModel):
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
+    # Crawl-only by default; intents come from /api/discover. Set True for legacy behavior.
+    extract_intents: bool = Field(default=False, description="Run IntentAgent on crawled content")
 
 class ThreadsCrawlResponse(BaseModel):
     """Response cho crawl endpoint."""
@@ -124,6 +158,7 @@ class ThreadsCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
+    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -137,6 +172,8 @@ class TiktokCrawlRequest(BaseModel):
     search_limit: int = Field(default=20, ge=1, le=50)
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
+    # Crawl-only by default; intents come from /api/discover. Set True for legacy behavior.
+    extract_intents: bool = Field(default=False, description="Run IntentAgent on crawled content")
 
 class TiktokCrawlResponse(BaseModel):
     """Response cho tiktok crawl endpoint."""
@@ -146,6 +183,7 @@ class TiktokCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
+    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -185,10 +223,18 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             raw_content="",
             error=f"Crawl error: {exc}",
         )
-    # ---- Mine intents + persist to pipeline state ----
-    intents, crawl_logs = await _mine_and_store(
-        raw_content, req.domain, req.platform, req.keywords
-    )
+    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
+    get_state().raw_social_content = raw_content
+    crawl_posts = _parse_posts(raw_content, req.platform)
+    if req.extract_intents:
+        intents, crawl_logs = await _mine_and_store(
+            raw_content, req.domain, req.platform, req.keywords
+        )
+    else:
+        intents, crawl_logs = [], [
+            f"Platform: {req.platform}",
+            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
+        ]
     # ---- Response ----
     return FacebookCrawlResponse(
         success=True,
@@ -197,6 +243,7 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
+        crawl_posts=crawl_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
@@ -232,10 +279,18 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             raw_content="",
             error=f"Crawl error: {exc}",
         )
-    # ---- Mine intents + persist to pipeline state ----
-    intents, crawl_logs = await _mine_and_store(
-        raw_content, req.domain, req.platform, req.keywords
-    )
+    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
+    get_state().raw_social_content = raw_content
+    crawl_posts = _parse_posts(raw_content, req.platform)
+    if req.extract_intents:
+        intents, crawl_logs = await _mine_and_store(
+            raw_content, req.domain, req.platform, req.keywords
+        )
+    else:
+        intents, crawl_logs = [], [
+            f"Platform: {req.platform}",
+            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
+        ]
     # ---- Response ----
     return ThreadsCrawlResponse(
         success=True,
@@ -244,6 +299,7 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
+        crawl_posts=crawl_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
@@ -280,10 +336,18 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             error=f"Crawl error: {exc}",
         )
     
-    # ---- Mine intents + persist to pipeline state ----
-    intents, crawl_logs = await _mine_and_store(
-        raw_content, req.domain, req.platform, req.keywords, source_type="tiktok"
-    )
+    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
+    get_state().raw_social_content = raw_content
+    crawl_posts = _parse_posts(raw_content, req.platform)
+    if req.extract_intents:
+        intents, crawl_logs = await _mine_and_store(
+            raw_content, req.domain, req.platform, req.keywords, source_type="tiktok"
+        )
+    else:
+        intents, crawl_logs = [], [
+            f"Platform: {req.platform}",
+            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
+        ]
     return TiktokCrawlResponse(
         success=True,
         platform=req.platform,
@@ -291,6 +355,7 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
+        crawl_posts=crawl_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
