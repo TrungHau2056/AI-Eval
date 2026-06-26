@@ -9,110 +9,15 @@ from langgraph.graph import END, START, StateGraph
 from src.llm.base import LLMClient
 from src.models.schemas import Intent, Persona
 from src.observability.langfuse import capture_io_enabled, langfuse_observation
+from src.prompts.loader import (
+    PERSONA_EVALUATOR_SYSTEM,
+    PERSONA_EVALUATOR_USER,
+    PERSONA_GENERATOR_REFINE_USER,
+    PERSONA_GENERATOR_SYSTEM,
+    PERSONA_GENERATOR_USER,
+)
 
 logger = logging.getLogger(__name__)
-
-
-GENERATOR_SYSTEM_PROMPT = """# ROLE
-Ban la mot Senior UX Researcher chuyen nghiep. Nhiem vu cua ban la nhan vao MOT DANH SACH Intents va voi moi Intent, xay dung dung 2 Persona co hanh vi va tam ly doi lap nhau de phuc vu tao bo kich ban kiem thu.
-
-# QUY TAC BAT BUOC
-1. Voi N intents dau vao, bat buoc tra ve dung 2 * N personas.
-2. Moi intent phai co 1 persona happy-path va 1 persona edge-case.
-3. Persona phai dua tren hanh vi, khong dua vao nhan khau hoc chung chung.
-4. Moi persona phai co trigger, utterance, frequency, pain, reject, expected_behavior.
-5. Hai persona trong cung intent phai khac nhau ro ve trigger, giong dieu utterance, pain/reject.
-6. Tra ve JSON hop le, khong them markdown hay text ben ngoai JSON."""
-
-GENERATOR_USER_PROMPT = """Xay dung 2 Persona doi lap cho danh sach Intents sau:
-
-**Danh sach Intents:**
-{intents_json}
-
-{guidance}
-{memory_context}
-
-Tra ve JSON dung schema:
-{{
-  "personas": [
-    {{
-      "intent_num": 1,
-      "intent_name": "Ten intent ke thua tu input",
-      "persona_num": 1,
-      "persona_type": "happy-path",
-      "trigger": "Hoan canh kich hoat cu the",
-      "utterance": "Cau chat mau cua user",
-      "frequency": "Tan suat cu the kem moc thoi gian",
-      "pain": "Vuong mac thuc te",
-      "reject": "Doi tuong/giai phap persona tu choi + ly do",
-      "special_situation": "Tinh huong dac biet neu co",
-      "research_source": "Nguon gia dinh/gia dinh tu data neu co",
-      "why_different": "Vi sao persona nay khac persona con lai",
-      "expected_behavior": "Hanh vi AI ky vong",
-      "ai_response_example": "Vi du ngan cach AI nen phan hoi"
-    }}
-  ]
-}}"""
-
-EVALUATOR_SYSTEM_PROMPT = """# ROLE
-Ban la Persona Quality Evaluator trong mot he thong multi-agent. Nhiem vu cua ban la cham batch personas theo Persona Research Rubric v0.2 truoc khi cho phep tao test case.
-
-# HARD GATE
-Neu sai bat ky gate nao thi approved=false, verdict="Revision", va viet revision_guidance cu the:
-1. Pool persona unique phai >= 3.
-2. Moi intent phai co >= 2 persona.
-3. Moi persona phai co research_source.
-4. Moi persona phai co day du cot bat buoc: trigger, utterance, frequency, pain, reject.
-
-# SCORING RUBRIC
-Cham 4 tieu chi, moi tieu chi muc 1-4:
-- P1 Behavioral Specificity / Persona du chi tiet, weight 3x. Check trigger, utterance, frequency, pain. 4/4 cu the => 4; 3/4 => 3; 2/4 => 2; <=1/4 => 1.
-- P2 Inter-Persona Divergence / 2 persona du khac nhau, weight 2x. Voi moi intent, 2 persona phai khac >=3/5 khia canh va BAT BUOC khac trigger + utterance register. 9-10/10 intent pass => 4; 7-8 => 3; 5-6 => 2; <5 => 1. Neu input it hon 10 intent, scale theo ty le intent pass.
-- P3 Internal Consistency / Persona khong tu mau thuan, weight 1x. Chi cham khi P1 >= 3; neu P1 < 3 thi P3=0. Check trigger-frequency, trigger-pain, trigger-utterance, frequency-pain, frequency-utterance, pain-utterance.
-- P4 Falsifiable Reject / Persona co bien gioi ro, weight 1x. Reject phai co doi tuong cu the va tie voi hoan canh persona. 100% pass => 4; >=75% => 3; >=50% cu the nhung thieu tie => 2; <50% hoac co reject trong => 1.
-
-Tong diem = P1*3 + P2*2 + P3 + P4. Max=28. Pass neu >=75% (>=21/28), Revision neu 50-74%, Rewrite neu <50%.
-
-# HARD FAIL CAPS
-- P1=1 => percent toi da 40%.
-- P2=1 => percent toi da 40%.
-- P4=1 => percent toi da 60%.
-
-Tra ve JSON hop le, khong them markdown hay text ben ngoai JSON."""
-
-EVALUATOR_USER_PROMPT = """Danh gia batch personas sau:
-
-**Intents goc:**
-{intents_json}
-
-**Personas can danh gia:**
-{personas_json}
-
-Hay tra ve JSON dung schema:
-{{
-  "approved": true,
-  "verdict": "Pass|Revision|Rewrite",
-  "total_score": 21,
-  "max_score": 28,
-  "percent": 0.75,
-  "criteria": {{
-    "P1": {{"level": 4, "weighted_score": 12, "reason": "Ly do ngan gon"}},
-    "P2": {{"level": 4, "weighted_score": 8, "reason": "Ly do ngan gon"}},
-    "P3": {{"level": 3, "weighted_score": 3, "reason": "Ly do ngan gon"}},
-    "P4": {{"level": 4, "weighted_score": 4, "reason": "Ly do ngan gon"}}
-  }},
-  "issues": [
-    {{
-      "severity": "low|medium|high",
-      "message": "Mo ta van de cu the",
-      "intent_num": 1
-    }}
-  ],
-  "top_fixes": [
-    "P[#] (diem/4) - gap cu the - viec can sua"
-  ],
-  "revision_guidance": "Huong dan ngan gon de persona_generator sua neu approved=false"
-}}"""
 
 
 class PersonaGraphState(TypedDict, total=False):
@@ -124,8 +29,11 @@ class PersonaGraphState(TypedDict, total=False):
     personas: list[dict[str, Any]]
     evaluation: dict[str, Any]
     revision_guidance: str
+    pairs_to_regenerate: list[int]
     next_node: str
     history: list[dict[str, Any]]
+    trace_id: str
+    parent_span_id: str
 
 
 def _strip_code_fences(raw: str) -> str:
@@ -147,6 +55,10 @@ def _coerce_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _str(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def _coerce_score(value: Any) -> float:
     try:
         score = float(value)
@@ -158,6 +70,17 @@ def _coerce_score(value: Any) -> float:
 
 
 def _score_from_evaluation(data: dict[str, Any]) -> float:
+    # New schema (PerGent v1.3): score is a nested object with total/percent
+    score_obj = data.get("score")
+    if isinstance(score_obj, dict):
+        percent = score_obj.get("percent")
+        if percent is not None:
+            return _coerce_score(percent)
+        total = score_obj.get("total")
+        if total is not None:
+            return _coerce_score(total)
+
+    # Old schema: flat total_score / max_score / percent
     total_score = data.get("total_score")
     max_score = data.get("max_score")
     if total_score is not None and max_score:
@@ -177,9 +100,10 @@ def _revision_guidance_from(data: dict[str, Any]) -> str:
     if explicit:
         return explicit
 
-    fixes = data.get("top_fixes", [])
-    if isinstance(fixes, list):
-        return "\n".join(str(fix) for fix in fixes if fix).strip()
+    for key in ("top3_fixes", "top_fixes"):
+        fixes = data.get(key, [])
+        if isinstance(fixes, list) and fixes:
+            return "\n".join(str(fix) for fix in fixes if fix).strip()
     return ""
 
 
@@ -225,42 +149,86 @@ class PersonaGeneratorNode:
     async def run(self, state: PersonaGraphState) -> dict[str, Any]:
         intents = state.get("intents", [])
         iteration = state.get("iteration", 0) + 1
-        guidance = self._build_guidance(state)
-        prompt = self._build_prompt(intents, guidance, state.get("memory_context", ""))
+        existing_personas = state.get("personas", [])
+        pairs_to_regenerate = state.get("pairs_to_regenerate", [])
+        revision_guidance = state.get("revision_guidance", "")
+        memory_context = state.get("memory_context", "")
+        trace_id = state.get("trace_id") or None
+        parent_span_id = state.get("parent_span_id") or None
 
-        logger.info("PersonaGeneratorNode | iteration=%d | intents=%d", iteration, len(intents))
-        trace_input = {
-            "agent": "persona_generator",
-            "iteration": iteration,
-            "guidance_provided": bool(guidance),
-            **_trace_intent_summary(intents),
-        }
+        is_refine = bool(existing_personas and pairs_to_regenerate)
+
+        if is_refine:
+            failed_intents = [i for i in intents if (i.intent_num or 0) in pairs_to_regenerate]
+            logger.info(
+                "PersonaGeneratorNode | REFINE | iteration=%d | failed_intents=%d | pairs_to_regenerate=%s | trace_id=%s | parent_span_id=%s",
+                iteration, len(failed_intents), pairs_to_regenerate, trace_id, parent_span_id,
+            )
+            prompt = self._build_refine_prompt(
+                failed_intents, revision_guidance, existing_personas, pairs_to_regenerate, memory_context,
+            )
+            trace_input = {
+                "agent": "persona_generator",
+                "mode": "REFINE",
+                "iteration": iteration,
+                "failed_intent_count": len(failed_intents),
+            }
+        else:
+            guidance = self._build_guidance(state)
+            logger.info(
+                "PersonaGeneratorNode | GENERATE | iteration=%d | intents=%d | trace_id=%s | parent_span_id=%s",
+                iteration, len(intents), trace_id, parent_span_id,
+            )
+            prompt = self._build_prompt(intents, guidance, memory_context)
+            trace_input = {
+                "agent": "persona_generator",
+                "mode": "GENERATE",
+                "iteration": iteration,
+                "guidance_provided": bool(guidance),
+                **_trace_intent_summary(intents),
+            }
+
         with langfuse_observation(
             "persona-generator",
             as_type="generation",
             model=_llm_model_name(self.llm),
-            input=_generation_input({"system": GENERATOR_SYSTEM_PROMPT, "prompt": prompt}, trace_input),
-            metadata={"agent": "persona_generator", "iteration": iteration},
+            input=_generation_input({"system": PERSONA_GENERATOR_SYSTEM, "prompt": prompt}, trace_input),
+            metadata={"agent": "persona_generator", "iteration": iteration, "mode": "REFINE" if is_refine else "GENERATE"},
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         ) as generation:
-            raw = await self.llm.generate(prompt, system_prompt=GENERATOR_SYSTEM_PROMPT)
-            personas = self._parse(raw, intents)
+            raw = await self.llm.generate(prompt, system_prompt=PERSONA_GENERATOR_SYSTEM)
+            new_personas = self._parse(raw, intents)
             generation.update(
-                output=_generation_output(raw, {"persona_count": len(personas)}),
+                output=_generation_output(raw, {"persona_count": len(new_personas)}),
                 metadata={
-                    "persona_count": len(personas),
+                    "persona_count": len(new_personas),
+                    "mode": "REFINE" if is_refine else "GENERATE",
                     "capture_io": capture_io_enabled(),
                 },
             )
-        logger.info("PersonaGeneratorNode parsed %d personas", len(personas))
+
+        if is_refine:
+            merged = [p for p in existing_personas if (p.get("intent_num") or 0) not in pairs_to_regenerate]
+            merged.extend(new_personas)
+            personas = merged
+            logger.info("PersonaGeneratorNode | REFINE merged | new=%d | kept=%d | total=%d",
+                        len(new_personas), len(merged) - len(new_personas), len(personas))
+        else:
+            personas = new_personas
+            logger.info("PersonaGeneratorNode parsed %d personas", len(personas))
 
         return {
             "iteration": iteration,
             "personas": personas,
+            "pairs_to_regenerate": [],
             "history": state.get("history", []) + [
                 {
                     "agent": "persona_generator",
                     "iteration": iteration,
+                    "mode": "REFINE" if is_refine else "GENERATE",
                     "persona_count": len(personas),
+                    "new_personas": len(new_personas),
                 }
             ],
         }
@@ -281,11 +249,51 @@ class PersonaGeneratorNode:
         intents_json = json.dumps(_intent_payload(intents), ensure_ascii=False, indent=2)
         memory_block = f"\n**Lich su / goi y truoc:**\n{memory_context}" if memory_context else ""
         guidance_block = f"\n{guidance}" if guidance else ""
-        return GENERATOR_USER_PROMPT.format(
+        return PERSONA_GENERATOR_USER.format(
             intents_json=intents_json,
             guidance=guidance_block,
             memory_context=memory_block,
         )
+
+    def _build_refine_prompt(
+        self,
+        failed_intents: list[Intent],
+        critic_feedback: str,
+        existing_personas: list[dict[str, Any]],
+        pairs_to_regenerate: list[int],
+        memory_context: str,
+    ) -> str:
+        intents_json = json.dumps(_intent_payload(failed_intents), ensure_ascii=False, indent=2)
+        memory_block = f"\n**Lich su / goi y truoc:**\n{memory_context}" if memory_context else ""
+
+        digest = self._build_passed_personas_digest(existing_personas, pairs_to_regenerate)
+        feedback = critic_feedback or "Khong co feedback cu the. Review lai rubric va tao lai."
+
+        return PERSONA_GENERATOR_REFINE_USER.format(
+            intents_json=intents_json,
+            critic_feedback=feedback,
+            passed_personas_digest=digest,
+            guidance="",
+            memory_context=memory_block,
+        )
+
+    @staticmethod
+    def _build_passed_personas_digest(
+        personas: list[dict[str, Any]], pairs_to_regenerate: list[int]
+    ) -> str:
+        lines: list[str] = []
+        for p in personas:
+            inum = p.get("intent_num") or 0
+            if inum in pairs_to_regenerate:
+                continue
+            pnum = p.get("persona_num", "?")
+            ptype = p.get("persona_type", "")
+            trigger = _str(p.get("trigger"))[:100]
+            pain = _str(p.get("pain"))[:100]
+            lines.append(
+                f"- Intent {inum}, Persona {pnum}: type={ptype} | trigger={trigger} | pain={pain}"
+            )
+        return "\n".join(lines) if lines else "Khong co persona PASS."
 
     def _parse(self, raw: str, intents: list[Intent]) -> list[dict[str, Any]]:
         try:
@@ -311,27 +319,27 @@ class PersonaGeneratorNode:
             intent = intent_map.get(inum)
             intent_id = intent.id if intent else (intents[0].id if intents else "")
             trait = "easy" if "happy" in persona_type.lower() else "hard"
-            trigger = item.get("trigger", "")
-            pain = item.get("pain", "")
+            trigger = _str(item.get("trigger"))
+            pain = _str(item.get("pain"))
 
             results.append(
                 Persona(
                     intent_id=intent_id,
                     intent_num=inum,
-                    intent_name=item.get("intent_name", ""),
+                    intent_name=_str(item.get("intent_name")),
                     persona_num=item.get("persona_num", 0),
                     persona_type=persona_type,
                     trigger=trigger,
-                    utterance=item.get("utterance", ""),
-                    frequency=item.get("frequency", ""),
+                    utterance=_str(item.get("utterance")),
+                    frequency=_str(item.get("frequency")),
                     pain=pain,
-                    reject=item.get("reject", ""),
-                    special_situation=item.get("special_situation", ""),
-                    research_source=item.get("research_source", ""),
-                    why_different=item.get("why_different", ""),
-                    expected_behavior=item.get("expected_behavior", ""),
-                    ai_response_example=item.get("ai_response_example", ""),
-                    name=f"{'Happy-path' if trait == 'easy' else 'Edge-case'} - {item.get('intent_name', '')}",
+                    reject=_str(item.get("reject")),
+                    special_situation=_str(item.get("special_situation")),
+                    research_source=_str(item.get("research_source")),
+                    why_different=_str(item.get("why_different")),
+                    expected_behavior=_str(item.get("expected_behavior")),
+                    ai_response_example=_str(item.get("ai_response_example")),
+                    name=f"{'Happy-path' if trait == 'easy' else 'Edge-case'} - {_str(item.get('intent_name'))}",
                     description=f"Trigger: {trigger} | Pain: {pain}",
                     trait_type=trait,
                 ).model_dump()
@@ -348,32 +356,74 @@ class PersonaEvaluatorNode:
     async def run(self, state: PersonaGraphState) -> dict[str, Any]:
         intents = state.get("intents", [])
         personas = state.get("personas", [])
-        structural_eval = self._validate_structure(intents, personas)
+        trace_id = state.get("trace_id") or None
+        parent_span_id = state.get("parent_span_id") or None
+        iteration = state.get("iteration", 0)
+        max_iterations = state.get("max_iterations", 5)
 
-        logger.info("PersonaEvaluatorNode | personas=%d", len(personas))
-        llm_eval = await self._evaluate_with_llm(intents, personas)
-        evaluation = self._merge_evaluations(structural_eval, llm_eval)
+        previous_evaluation = state.get("evaluation", {})
+        previous_failed = previous_evaluation.get("pairs_to_regenerate", [])
+
+        if previous_failed:
+            regen_personas = [p for p in personas if (p.get("intent_num") or 0) in previous_failed]
+            passed_personas = [p for p in personas if (p.get("intent_num") or 0) not in previous_failed]
+            regen_intents = [i for i in intents if (i.intent_num or 0) in previous_failed]
+            logger.info(
+                "PersonaEvaluatorNode | RE-EVAL only regen pairs | regen=%d | passed=%d | previous_failed=%s",
+                len(regen_personas), len(passed_personas), previous_failed,
+            )
+            evaluation = await self._evaluate_with_llm(
+                regen_intents, regen_personas, trace_id, parent_span_id,
+                iteration, max_iterations, passed_personas=passed_personas,
+            )
+        else:
+            logger.info(
+                "PersonaEvaluatorNode | FULL eval | personas=%d | trace_id=%s | parent_span_id=%s",
+                len(personas), trace_id, parent_span_id,
+            )
+            evaluation = await self._evaluate_with_llm(
+                intents, personas, trace_id, parent_span_id, iteration, max_iterations,
+            )
 
         return {
             "evaluation": evaluation,
             "revision_guidance": evaluation.get("revision_guidance", ""),
+            "pairs_to_regenerate": evaluation.get("pairs_to_regenerate", []),
             "history": state.get("history", []) + [
                 {
                     "agent": "persona_evaluator",
                     "iteration": state.get("iteration", 0),
                     "approved": evaluation.get("approved", False),
                     "score": evaluation.get("score", 0.0),
+                    "pairs_to_regenerate": evaluation.get("pairs_to_regenerate", []),
                     "issues": evaluation.get("issues", []),
                 }
             ],
         }
 
     async def _evaluate_with_llm(
-        self, intents: list[Intent], personas: list[dict[str, Any]]
+        self,
+        intents: list[Intent],
+        personas: list[dict[str, Any]],
+        trace_id: str | None = None,
+        parent_span_id: str | None = None,
+        iteration: int = 0,
+        max_iterations: int = 5,
+        passed_personas: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        prompt = EVALUATOR_USER_PROMPT.format(
+        if passed_personas:
+            passed_context = (
+                "\n**Personas da PASS (chi dung cho P5 cross-pair check, KHONG danh gia lai P1-P4):**\n"
+                + json.dumps(passed_personas, ensure_ascii=False, indent=2)
+            )
+        else:
+            passed_context = ""
+        prompt = PERSONA_EVALUATOR_USER.format(
             intents_json=json.dumps(_intent_payload(intents), ensure_ascii=False, indent=2),
             personas_json=json.dumps(personas, ensure_ascii=False, indent=2),
+            passed_context=passed_context,
+            iteration_number=iteration,
+            max_iterations=max_iterations,
         )
         trace_input = {
             "agent": "persona_evaluator",
@@ -384,10 +434,12 @@ class PersonaEvaluatorNode:
             "persona-evaluator",
             as_type="generation",
             model=_llm_model_name(self.llm),
-            input=_generation_input({"system": EVALUATOR_SYSTEM_PROMPT, "prompt": prompt}, trace_input),
+            input=_generation_input({"system": PERSONA_EVALUATOR_SYSTEM, "prompt": prompt}, trace_input),
             metadata={"agent": "persona_evaluator", "pass_threshold": self.pass_threshold},
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         ) as generation:
-            raw = await self.llm.generate(prompt, system_prompt=EVALUATOR_SYSTEM_PROMPT)
+            raw = await self.llm.generate(prompt, system_prompt=PERSONA_EVALUATOR_SYSTEM)
             try:
                 data = _loads_json(raw)
             except json.JSONDecodeError:
@@ -395,6 +447,8 @@ class PersonaEvaluatorNode:
                 result = {
                     "approved": False,
                     "score": 0.0,
+                    "pairs_to_regenerate": [i.intent_num for i in intents],
+                    "pair_results": [],
                     "issues": [{"severity": "high", "message": "Evaluator returned invalid JSON"}],
                     "revision_guidance": "Tra ve dung JSON schema va danh gia lai batch personas.",
                 }
@@ -407,6 +461,8 @@ class PersonaEvaluatorNode:
                 result = {
                     "approved": False,
                     "score": 0.0,
+                    "pairs_to_regenerate": [i.intent_num for i in intents],
+                    "pair_results": [],
                     "issues": [{"severity": "high", "message": "Evaluator JSON must be an object"}],
                     "revision_guidance": "Tra ve mot JSON object dung schema danh gia.",
                 }
@@ -416,121 +472,83 @@ class PersonaEvaluatorNode:
                 )
                 return result
 
-            score = _score_from_evaluation(data)
-            verdict = str(data.get("verdict", "")).lower()
-            approved = bool(data.get("approved", False)) or verdict == "pass" or score >= self.pass_threshold
+            pairs_to_regenerate = data.get("pairs_to_regenerate", [])
+            if not isinstance(pairs_to_regenerate, list):
+                pairs_to_regenerate = []
+            pairs_to_regenerate = [_coerce_int(p) for p in pairs_to_regenerate]
+
+            batch_summary = data.get("batch_summary", {})
+            if not isinstance(batch_summary, dict):
+                batch_summary = {}
+            pair_results = data.get("pair_results", [])
+            if not isinstance(pair_results, list):
+                pair_results = []
+
+            total_pairs = _coerce_int(batch_summary.get("total_pairs"), len(pair_results))
+            pairs_passed = _coerce_int(batch_summary.get("pairs_passed"), 0)
+            score = (pairs_passed / total_pairs) if total_pairs > 0 else 0.0
+            score = max(0.0, min(score, 1.0))
+
+            approved = len(pairs_to_regenerate) == 0
+
+            logger.info(
+                "PersonaEvaluatorNode | verdict=%s | approved=%s | pairs_to_regenerate=%s | score=%.2f | pairs_passed=%d/%d",
+                "Pass" if approved else "Revision",
+                approved,
+                pairs_to_regenerate,
+                score,
+                pairs_passed,
+                total_pairs,
+            )
+
+            fixes: list[str] = []
+            all_issues: list[dict[str, Any]] = []
+            for pr in pair_results:
+                if not isinstance(pr, dict):
+                    continue
+                pr_verdict = str(pr.get("verdict", "")).upper()
+                if pr_verdict == "FAIL":
+                    pr_fixes = pr.get("fixes", [])
+                    if isinstance(pr_fixes, list):
+                        fixes.extend(str(f) for f in pr_fixes if f)
+                    pr_issues = pr.get("persona_issues", {})
+                    if isinstance(pr_issues, dict):
+                        for pid, msgs in pr_issues.items():
+                            if isinstance(msgs, list):
+                                for msg in msgs:
+                                    all_issues.append({"persona_id": pid, "message": str(msg)})
+
+            revision_guidance = "\n".join(fixes) if fixes else _revision_guidance_from(data)
+
             result = {
                 "approved": approved,
                 "score": score,
-                "verdict": data.get("verdict", "Pass" if approved else "Revision"),
-                "criteria": data.get("criteria", {}),
-                "issues": data.get("issues", []) if isinstance(data.get("issues", []), list) else [],
-                "top_fixes": data.get("top_fixes", []) if isinstance(data.get("top_fixes", []), list) else [],
-                "revision_guidance": _revision_guidance_from(data),
+                "verdict": "Pass" if approved else "Revision",
+                "pairs_to_regenerate": pairs_to_regenerate,
+                "pair_results": pair_results,
+                "batch_summary": batch_summary,
+                "issues": all_issues,
+                "top_fixes": fixes,
+                "revision_guidance": revision_guidance,
             }
             generation.update(
                 output=_generation_output(data, {
                     "approved": result["approved"],
                     "score": result["score"],
                     "verdict": result["verdict"],
-                    "issue_count": len(result["issues"]),
+                    "pairs_to_regenerate": pairs_to_regenerate,
+                    "pairs_passed": pairs_passed,
+                    "total_pairs": total_pairs,
                 }),
                 metadata={
                     "approved": result["approved"],
                     "score": result["score"],
                     "verdict": result["verdict"],
-                    "issue_count": len(result["issues"]),
+                    "pairs_to_regenerate": pairs_to_regenerate,
                     "capture_io": capture_io_enabled(),
                 },
             )
             return result
-
-    def _validate_structure(
-        self, intents: list[Intent], personas: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        issues: list[dict[str, Any]] = []
-        expected_count = len(intents) * 2
-        if len(personas) < expected_count:
-            issues.append(
-                {
-                    "severity": "high",
-                    "message": f"Expected at least {expected_count} personas for {len(intents)} intents, got {len(personas)}.",
-                }
-            )
-        if len(personas) < 3:
-            issues.append(
-                {
-                    "severity": "high",
-                    "message": "Persona pool must contain at least 3 unique personas before test case writing.",
-                }
-            )
-
-        for intent in intents:
-            matching = [p for p in personas if p.get("intent_id") == intent.id]
-            if len(matching) < 2:
-                issues.append(
-                    {
-                        "severity": "high",
-                        "intent_num": intent.intent_num,
-                        "message": "Intent must have at least 2 personas.",
-                    }
-                )
-
-        required_fields = ("trigger", "utterance", "frequency", "pain", "reject")
-        for persona in personas:
-            missing = [field for field in required_fields if not str(persona.get(field, "")).strip()]
-            if missing:
-                issues.append(
-                    {
-                        "severity": "high",
-                        "message": f"Persona {persona.get('id', '')} is missing required fields: {', '.join(missing)}.",
-                    }
-                )
-            if not str(persona.get("research_source", "")).strip():
-                issues.append(
-                    {
-                        "severity": "high",
-                        "message": f"Persona {persona.get('id', '')} is missing research_source.",
-                    }
-                )
-
-        return {
-            "approved": not issues,
-            "score": 1.0 if not issues else 0.0,
-            "issues": issues,
-            "revision_guidance": "Sua hard gate: pool >=3, moi intent >=2 persona, moi persona co research_source va du trigger/utterance/frequency/pain/reject."
-            if issues
-            else "",
-        }
-
-    def _merge_evaluations(
-        self, structural_eval: dict[str, Any], llm_eval: dict[str, Any]
-    ) -> dict[str, Any]:
-        issues = structural_eval.get("issues", []) + llm_eval.get("issues", [])
-        score = min(_coerce_score(structural_eval.get("score")), _coerce_score(llm_eval.get("score")))
-        approved = (
-            structural_eval.get("approved", False)
-            and llm_eval.get("approved", False)
-            and score >= self.pass_threshold
-        )
-
-        revision_parts = [
-            structural_eval.get("revision_guidance", ""),
-            llm_eval.get("revision_guidance", ""),
-        ]
-        revision_guidance = "\n".join(p for p in revision_parts if p).strip()
-        if not approved and not revision_guidance:
-            revision_guidance = "Lam persona cu the hon, doi lap hon va bam sat tung intent hon."
-
-        return {
-            "approved": approved,
-            "score": score,
-            "verdict": llm_eval.get("verdict", "Pass" if approved else "Revision"),
-            "criteria": llm_eval.get("criteria", {}),
-            "issues": issues,
-            "top_fixes": llm_eval.get("top_fixes", []),
-            "revision_guidance": revision_guidance,
-        }
 
 
 class PersonaOrchestratorNode:
@@ -538,20 +556,29 @@ class PersonaOrchestratorNode:
         personas = state.get("personas", [])
         evaluation = state.get("evaluation", {})
         iteration = state.get("iteration", 0)
-        max_iterations = state.get("max_iterations", 3)
+        max_iterations = state.get("max_iterations", 5)
+        trace_id = state.get("trace_id") or None
+        parent_span_id = state.get("parent_span_id") or None
+        pairs_to_regenerate = evaluation.get("pairs_to_regenerate", [])
 
+        logger.info(
+            "PersonaOrchestratorNode | state keys=%s | trace_id=%s | parent_span_id=%s",
+            list(state.keys()),
+            trace_id,
+            parent_span_id,
+        )
         if not personas:
             next_node = "persona_generator"
             reason = "No personas generated yet."
-        elif evaluation.get("approved", False):
+        elif not pairs_to_regenerate:
             next_node = "end"
-            reason = "Evaluator approved personas."
+            reason = "All pairs passed evaluation."
         elif iteration >= max_iterations:
             next_node = "end"
-            reason = "Reached max iterations; returning best available personas."
+            reason = f"Reached max iterations ({max_iterations}); returning best available personas. Unresolved: {pairs_to_regenerate}"
         else:
             next_node = "persona_generator"
-            reason = "Evaluator requested revisions."
+            reason = f"{len(pairs_to_regenerate)} pairs need regeneration: {pairs_to_regenerate}"
 
         logger.info("PersonaOrchestratorNode | next=%s | reason=%s", next_node, reason)
         with langfuse_observation(
@@ -561,19 +588,24 @@ class PersonaOrchestratorNode:
                 "iteration": iteration,
                 "persona_count": len(personas),
                 "approved": evaluation.get("approved", False),
+                "pairs_to_regenerate": pairs_to_regenerate,
             },
             metadata={"agent": "orchestrator"},
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         ) as span:
             span.update(output={"next_node": next_node, "reason": reason})
 
         return {
             "next_node": next_node,
+            "pairs_to_regenerate": pairs_to_regenerate,
             "history": state.get("history", []) + [
                 {
                     "agent": "orchestrator",
                     "iteration": iteration,
                     "next_node": next_node,
                     "reason": reason,
+                    "pairs_to_regenerate": pairs_to_regenerate,
                 }
             ],
         }
@@ -583,7 +615,7 @@ class PersonaGenerationGraph:
     def __init__(
         self,
         llm: LLMClient,
-        max_iterations: int = 3,
+        max_iterations: int = 5,
         pass_threshold: float = 0.75,
     ):
         self.llm = llm
@@ -617,6 +649,7 @@ class PersonaGenerationGraph:
         intents: list[Intent],
         guidance: str = "",
         memory_context: str = "",
+        trace_id: str | None = None,
     ) -> PersonaGraphState:
         initial_state: PersonaGraphState = {
             "intents": intents,
@@ -627,7 +660,10 @@ class PersonaGenerationGraph:
             "personas": [],
             "evaluation": {},
             "revision_guidance": "",
+            "pairs_to_regenerate": [],
             "history": [],
+            "trace_id": trace_id or "",
+            "parent_span_id": "",
         }
         with langfuse_observation(
             "persona-generation-graph",
@@ -642,7 +678,16 @@ class PersonaGenerationGraph:
                 "max_iterations": self.max_iterations,
                 "pass_threshold": self.pass_threshold,
             },
+            trace_id=trace_id,
         ) as root_span:
+            initial_state["parent_span_id"] = root_span.id
+            logger.info(
+                "PersonaGenerationGraph | root_span.id=%s | root_span.trace_id=%s | type=%s | parent_span_id in state=%s",
+                root_span.id,
+                getattr(root_span, "trace_id", "N/A"),
+                type(root_span).__name__,
+                initial_state["parent_span_id"],
+            )
             final_state = await self.graph.ainvoke(initial_state)
             evaluation = final_state.get("evaluation", {})
             root_span.update(
@@ -652,6 +697,7 @@ class PersonaGenerationGraph:
                     "approved": evaluation.get("approved", False),
                     "score": evaluation.get("score"),
                     "verdict": evaluation.get("verdict"),
+                    "pairs_to_regenerate": evaluation.get("pairs_to_regenerate", []),
                 }
             )
             return final_state

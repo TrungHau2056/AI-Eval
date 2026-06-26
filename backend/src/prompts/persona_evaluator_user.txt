@@ -1,0 +1,9 @@
+Danh gia batch personas sau:
+
+**Intents goc:**
+{intents_json}
+
+**Personas can danh gia:**
+{personas_json}
+{passed_context}
+**Iteration:** {iteration_number}/{max_iterations}

@@ -1,0 +1,13 @@
+Che do: REFINE — Chi tao lai cac pair FAIL duoc liet ke ben duoi. KHONG tao lai pair da PASS. Output chi gom cac pair duoc tao lai.
+
+**Danh sach Intents can tao lai (chi intent FAIL):**
+{intents_json}
+
+**Phan hoi tu Critic (fixes can ap dung):**
+{critic_feedback}
+
+**Tom tat persona da PASS (tranh clone P5):**
+{passed_personas_digest}
+
+{guidance}
+{memory_context}

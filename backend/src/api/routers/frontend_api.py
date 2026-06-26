@@ -229,6 +229,7 @@ def discover_intents(req: DiscoverRequest):
         raise HTTPException(400, "Please enter some logs text or upload a file first.")
 
     state = get_state()
+    state.trace_id = uuid.uuid4().hex
     state.raw_input = RawInput(source_type="text", content=req.logsText)
 
     model = _get_model()
@@ -248,7 +249,7 @@ def discover_intents(req: DiscoverRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting IntentAgent.run() ...")
-        results = loop.run_until_complete(agent.run(state.raw_input, req.ruleText))
+        results = loop.run_until_complete(agent.run(state.raw_input, req.ruleText, trace_id=state.trace_id))
         logger.info("IntentAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("IntentAgent.run() failed: %s", e, exc_info=True)
@@ -269,6 +270,8 @@ def discover_intents(req: DiscoverRequest):
 def generate_personas(req: GeneratePersonasRequest):
     logger.info("POST /api/generate-personas | num_intents=%d | ruleText=%s", len(req.intents), bool(req.ruleText))
     state = get_state()
+    if not state.trace_id:
+        state.trace_id = uuid.uuid4().hex
 
     # Use internal intents if available (from discover), otherwise map from FE intents
     if state.internal_intents:
@@ -306,7 +309,7 @@ def generate_personas(req: GeneratePersonasRequest):
         guidance = req.ruleText
         if req.feedback:
             guidance = f"{guidance}\n{req.feedback}" if guidance else req.feedback
-        results = loop.run_until_complete(agent.run(internal_intents, guidance))
+        results = loop.run_until_complete(agent.run(internal_intents, guidance, trace_id=state.trace_id))
         logger.info("PersonaAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("PersonaAgent.run() failed: %s", e, exc_info=True)
@@ -328,6 +331,8 @@ def generate_personas(req: GeneratePersonasRequest):
 def generate_testcases(req: GenerateTestCasesRequest):
     logger.info("POST /api/generate-testcases | ruleText=%s", bool(req.ruleText))
     state = get_state()
+    if not state.trace_id:
+        state.trace_id = uuid.uuid4().hex
 
     # Use internal data if available, otherwise map from FE data
     internal_intents = state.internal_intents or []
@@ -376,7 +381,7 @@ def generate_testcases(req: GenerateTestCasesRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting TestCaseAgent.run() ...")
-        results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText))
+        results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText, trace_id=state.trace_id))
         logger.info("TestCaseAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("TestCaseAgent.run() failed: %s", e, exc_info=True)

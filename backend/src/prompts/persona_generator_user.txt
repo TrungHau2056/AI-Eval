@@ -1,0 +1,7 @@
+Xay dung 2 Persona doi lap cho moi intent trong danh sach Intents sau:
+
+**Danh sach Intents:**
+{intents_json}
+
+{guidance}
+{memory_context}
