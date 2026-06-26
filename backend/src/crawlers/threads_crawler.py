@@ -166,6 +166,9 @@ class ThreadsCrawler(BaseCrawler):
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
+            # Giới hạn số URL deep-scrape đúng bằng posts_limit để tiết kiệm chi phí
+            urls = urls[: self.posts_limit]
+
             # ---- Step 3: Deep scrape posts ----
             if urls:
                 scraped = await self.scrape_posts(urls)
@@ -177,8 +180,8 @@ class ThreadsCrawler(BaseCrawler):
             logger.info("Falling back to Threads search results for keyword '%s'.", keyword)
             all_posts.extend(search_results)
 
-        # ---- Format output ----
-        return self._format_output(all_posts)
+        # ---- Format output (giới hạn đúng posts_limit bài) ----
+        return self._format_output(all_posts, limit=self.posts_limit)
 
     # ==================================================================
     # Format helpers
@@ -252,9 +255,10 @@ class ThreadsCrawler(BaseCrawler):
             author = author.get("username") or author.get("name") or ""
         return str(author).strip()
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+    def _format_output(self, posts: list[dict[str, Any]], limit: int | None = None) -> str:
         """
         Format list posts thành JSON string cho IntentAgent.
+        Nếu `limit` được set, chỉ giữ tối đa `limit` bài.
         """
         import json
         if not posts:
@@ -264,6 +268,8 @@ class ThreadsCrawler(BaseCrawler):
         seen_urls: set[str] = set()
         
         for post in posts:
+            if limit is not None and len(cleaned_posts) >= limit:
+                break
             url = self._extract_url(post)
             text = self._extract_text(post)
             if not text:
