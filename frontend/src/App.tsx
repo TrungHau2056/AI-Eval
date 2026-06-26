@@ -228,6 +228,12 @@ export default function App() {
     saveStateToServer({ intents: updatedList });
   };
 
+  const handleToggleSelectAllIntents = (checked: boolean) => {
+    const updatedList = intents.map((item) => ({ ...item, selected: checked }));
+    setIntents(updatedList);
+    saveStateToServer({ intents: updatedList });
+  };
+
   const handleAddIntent = () => {
     const newIntent: Intent = {
       id: `custom-int-${Date.now()}`,
@@ -582,6 +588,7 @@ export default function App() {
               <IntentCurationTab
                 intents={intents}
                 onUpdateIntent={handleUpdateIntent}
+                onToggleSelectAll={handleToggleSelectAllIntents}
                 onAddIntent={handleAddIntent}
                 onProcessIntents={handleProcessIntents}
                 ruleText={personaRule}

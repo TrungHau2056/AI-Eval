@@ -136,3 +136,5 @@ class PipelineState(BaseModel):
     internal_personas: list[Persona] = Field(default_factory=list)
     internal_test_prompts: list[TestCasePrompt] = Field(default_factory=list)
     current_step: int = 0
+    trace_id: str = ""
+

@@ -84,7 +84,6 @@ export default function PersonaPlaygroundTab({
   const renderPersonaCard = (persona: Persona, label: string, isHappy: boolean) => {
     if (!persona) return null;
     const borderColor = isHappy ? "border-t-[#ff4d00]" : "border-t-stone-400";
-    const accentColor = isHappy ? "accent-[#ff4d00]" : "accent-stone-500";
     const btnBorder = isHappy ? "border-[#ff4d00] text-[#ff4d00] hover:bg-[#ff4d00]/5" : "border-stone-400 text-stone-600 hover:bg-stone-50";
     const icon = isHappy ? "sentiment_satisfied" : "sentiment_very_dissatisfied";
     const iconColor = isHappy ? "text-[#ff4d00]" : "text-stone-500";
@@ -142,26 +141,14 @@ export default function PersonaPlaygroundTab({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold">Frequency</label>
-            <div className="col-span-2 space-y-1">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="1"
-                  max="100"
-                  value={persona.frequency}
-                  onChange={(e) => onUpdatePersona(persona.id, { frequency: parseInt(e.target.value) })}
-                  className={`flex-grow ${accentColor} h-1 bg-stone-100 rounded-none cursor-pointer`}
-                />
-                <span className="text-xs font-mono font-bold text-stone-600">{persona.frequency}%</span>
-              </div>
-              {persona.frequencyText && (
-                <p className="text-[10px] font-mono text-stone-400 tracking-wide">
-                  Estimated: {persona.frequencyText}
-                </p>
-              )}
-            </div>
+          <div className="grid grid-cols-3 gap-4 items-start">
+            <label className="text-[10px] text-stone-500 uppercase tracking-wider font-bold pt-1">Frequency</label>
+            <AutoTextarea
+              value={persona.frequencyText || ""}
+              onChange={(e) => onUpdatePersona(persona.id, { frequencyText: e.target.value })}
+              minRows={2}
+              className="col-span-2 bg-stone-50 border border-stone-200 rounded-none px-3 py-1.5 text-[13px] text-stone-900 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all resize-none overflow-hidden"
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-4 items-start">

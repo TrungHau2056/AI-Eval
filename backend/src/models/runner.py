@@ -26,14 +26,14 @@ class PersonaAgentRunner:
     Runner xử lý nhiều intent qua agent loop.
 
     Usage:
-        runner = PersonaAgentRunner(llm=client, max_iterations=3)
+        runner = PersonaAgentRunner(llm=client, max_iterations=5)
         result = await runner.run_all(intents, rubric)
     """
 
     def __init__(
         self,
         llm: PersonaAgentLLMBase,
-        max_iterations: int = 3,
+        max_iterations: int = 5,
         on_progress: Callable[[str], None] | None = None,
     ):
         self.llm = llm

@@ -15,7 +15,7 @@ class PersonaAgent:
         self,
         llm: LLMClient,
         memory: BaseMemory | None = None,
-        max_iterations: int = 3,
+        max_iterations: int = 5,
         pass_threshold: float = 0.75,
     ):
         self.llm = llm
@@ -23,7 +23,7 @@ class PersonaAgent:
         self.max_iterations = max_iterations
         self.pass_threshold = pass_threshold
 
-    async def run(self, intents: list[Intent], guidance: str = "") -> list[dict[str, Any]]:
+    async def run(self, intents: list[Intent], guidance: str = "", trace_id: str | None = None) -> list[dict[str, Any]]:
         logger.info("PersonaAgent.run() | num_intents=%d | guidance=%s", len(intents), bool(guidance))
         if guidance:
             self.memory.add("user", guidance)
@@ -37,6 +37,7 @@ class PersonaAgent:
             intents,
             guidance=guidance,
             memory_context=self.memory.get_context(),
+            trace_id=trace_id,
         )
         personas = final_state.get("personas", [])
         evaluation = final_state.get("evaluation", {})
@@ -50,7 +51,7 @@ class PersonaAgent:
         self.memory.add("assistant", [p.get("persona_type", "") for p in personas])
         return personas
 
-    async def run_single(self, intent: Intent, guidance: str = "") -> list[dict[str, Any]]:
+    async def run_single(self, intent: Intent, guidance: str = "", trace_id: str | None = None) -> list[dict[str, Any]]:
         logger.info("PersonaAgent.run_single() | intent=%s | guidance=%s", intent.intent_name, bool(guidance))
         if guidance:
             self.memory.add("user", guidance)
@@ -64,6 +65,7 @@ class PersonaAgent:
             [intent],
             guidance=guidance,
             memory_context=self.memory.get_context(),
+            trace_id=trace_id,
         )
         personas = final_state.get("personas", [])
         evaluation = final_state.get("evaluation", {})

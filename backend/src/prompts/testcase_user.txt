@@ -1,0 +1,9 @@
+Thiết kế Test Cases cho các cặp Persona-Intent sau:
+
+**Intents:**
+{intents_json}
+
+**Personas:**
+{personas_json}
+
+{guidance}{memory_context}

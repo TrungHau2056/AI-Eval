@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class NoopObservation:
+    id: str = ""
+    trace_id: str = ""
+
     def update(self, **_: Any) -> None:
         return None
 
@@ -26,7 +29,7 @@ def capture_io_enabled() -> bool:
 def _ensure_env_for_sdk() -> None:
     os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
     os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
-    os.environ.setdefault("LANGFUSE_BASE_URL", settings.langfuse_base_url)
+    os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_base_url)
 
 
 @contextmanager
@@ -37,6 +40,8 @@ def langfuse_observation(
     input: Any = None,
     metadata: dict[str, Any] | None = None,
     model: str | None = None,
+    trace_id: str | None = None,
+    parent_span_id: str | None = None,
 ) -> Iterator[Any]:
     if not langfuse_enabled():
         yield NoopObservation()
@@ -57,6 +62,13 @@ def langfuse_observation(
             kwargs["metadata"] = metadata
         if model:
             kwargs["model"] = model
+        trace_context: dict[str, Any] = {}
+        if trace_id:
+            trace_context["trace_id"] = trace_id
+        if parent_span_id:
+            trace_context["parent_span_id"] = parent_span_id
+        if trace_context:
+            kwargs["trace_context"] = trace_context
 
         observation = langfuse.start_as_current_observation(**kwargs)
     except Exception:

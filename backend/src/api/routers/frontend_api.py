@@ -13,6 +13,7 @@ from src.ingestion.loader_factory import get_loader
 from src.ingestion.normalizer import merge_sources
 from src.ingestion.prd_loader import PRDLoader
 from src.llm.factory import create_llm_client
+from src.observability.langfuse import flush_langfuse
 from src.models.schemas import (
     FEIntent,
     FEPersona,
@@ -156,7 +157,7 @@ def _map_pipeline_personas_to_fe(results: list[dict], fe_intent_name_to_id: dict
             id=r.get("id", uuid.uuid4().hex[:8]),
             intentId=intent_id,
             type=fe_type,
-            name=r.get("name", ""),
+            name=r.get("persona_type", "") or r.get("name", ""),
             trigger=r.get("trigger", ""),
             utterance=r.get("utterance", ""),
             frequency=freq,
@@ -304,11 +305,11 @@ async def ingest_sources(
     }
 
 
-async def _mine_intents(content: str, guidance: str, llm, memory_name: str) -> list[dict]:
+async def _mine_intents(content: str, guidance: str, llm, memory_name: str, trace_id: str | None = None) -> list[dict]:
     agent = IntentAgent(llm, memory=get_memory(memory_name), max_chunk_tokens=settings.chunk_max_tokens)
     if guidance:
         agent.add_feedback(f"Extract intents: {guidance}")
-    return await agent.run(RawInput(source_type="text", content=content), guidance)
+    return await agent.run(RawInput(source_type="text", content=content), guidance, trace_id=trace_id)
 
 
 @router.post("/api/discover")
@@ -333,6 +334,9 @@ def discover_intents(req: DiscoverRequest):
     if not data_content.strip() and not prd_content.strip():
         raise HTTPException(400, "Please enter some logs text or upload a file first.")
 
+    if not state.trace_id:
+        state.trace_id = uuid.uuid4().hex
+
     # Mine data ĐỘC LẬP với PRD: chỉ dùng ruleText do user đặt, KHÔNG nhét nội
     # dung PRD vào guidance (nếu nhét, data_intents sẽ phản chiếu PRD → "all
     # confirmed", che mất intent thật của data → hỏng gap analysis).
@@ -350,9 +354,9 @@ def discover_intents(req: DiscoverRequest):
         data_intents: list[dict] = []
         prd_intents: list[dict] = []
         if data_content.strip():
-            data_intents = await _mine_intents(data_content, guidance, llm, "intent")
+            data_intents = await _mine_intents(data_content, guidance, llm, "intent", trace_id=state.trace_id)
         if prd_content.strip():
-            prd_intents = await _mine_intents(prd_content, "", llm, "intent_prd")
+            prd_intents = await _mine_intents(prd_content, "", llm, "intent_prd", trace_id=state.trace_id)
         if data_intents or prd_intents:
             comparator = IntentComparator(llm, api_key)
             prd_intents, data_intents = await comparator.compare(prd_intents, data_intents)
@@ -367,6 +371,7 @@ def discover_intents(req: DiscoverRequest):
         raise HTTPException(500, f"Loi sinh Intent: {e}")
     finally:
         loop.close()
+        flush_langfuse()
 
     results = data_intents + prd_intents
     fe_intents = _map_pipeline_intents_to_fe(results)
@@ -381,6 +386,8 @@ def discover_intents(req: DiscoverRequest):
 def generate_personas(req: GeneratePersonasRequest):
     logger.info("POST /api/generate-personas | num_intents=%d | ruleText=%s", len(req.intents), bool(req.ruleText))
     state = get_state()
+    if not state.trace_id:
+        state.trace_id = uuid.uuid4().hex
 
     # Use internal intents if available (from discover), otherwise map from FE intents
     if state.internal_intents:
@@ -418,13 +425,14 @@ def generate_personas(req: GeneratePersonasRequest):
         guidance = req.ruleText
         if req.feedback:
             guidance = f"{guidance}\n{req.feedback}" if guidance else req.feedback
-        results = loop.run_until_complete(agent.run(internal_intents, guidance))
+        results = loop.run_until_complete(agent.run(internal_intents, guidance, trace_id=state.trace_id))
         logger.info("PersonaAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("PersonaAgent.run() failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Persona: {e}")
     finally:
         loop.close()
+        flush_langfuse()
 
     # Map intent_name → FE intent id so personas get the correct intentId for frontend filtering
     fe_intent_name_to_id = {i.name: i.id for i in state.intents}
@@ -440,6 +448,8 @@ def generate_personas(req: GeneratePersonasRequest):
 def generate_testcases(req: GenerateTestCasesRequest):
     logger.info("POST /api/generate-testcases | ruleText=%s", bool(req.ruleText))
     state = get_state()
+    if not state.trace_id:
+        state.trace_id = uuid.uuid4().hex
 
     # Use internal data if available, otherwise map from FE data
     internal_intents = state.internal_intents or []
@@ -488,13 +498,14 @@ def generate_testcases(req: GenerateTestCasesRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting TestCaseAgent.run() ...")
-        results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText))
+        results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText, trace_id=state.trace_id))
         logger.info("TestCaseAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("TestCaseAgent.run() failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Test Case: {e}")
     finally:
         loop.close()
+        flush_langfuse()
 
     fe_testcases = _map_pipeline_testcases_to_fe(results)
     state.test_cases = fe_testcases

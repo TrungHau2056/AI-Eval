@@ -5,6 +5,7 @@ import AutoTextarea from "./AutoTextarea";
 interface IntentCurationTabProps {
   intents: Intent[];
   onUpdateIntent: (id: string, updated: Partial<Intent>) => void;
+  onToggleSelectAll: (checked: boolean) => void;
   onAddIntent: () => void;
   onProcessIntents: () => void;
   ruleText: string;
@@ -14,6 +15,7 @@ interface IntentCurationTabProps {
 export default function IntentCurationTab({
   intents,
   onUpdateIntent,
+  onToggleSelectAll,
   onAddIntent,
   onProcessIntents,
   ruleText,
@@ -44,10 +46,7 @@ export default function IntentCurationTab({
   };
 
   const handleToggleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = e.target.checked;
-    intents.forEach((item) => {
-      onUpdateIntent(item.id, { selected: checked });
-    });
+    onToggleSelectAll(e.target.checked);
   };
 
   const selectedCount = intents.filter((i) => i.selected).length;
@@ -135,13 +134,12 @@ export default function IntentCurationTab({
               <th className="px-4 py-3 w-[130px]">Phase</th>
               <th className="px-4 py-3">Utterance (Typical User Ask)</th>
               <th className="px-4 py-3 w-[230px]">Trigger Moment</th>
-              <th className="px-4 py-3 w-16"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 text-stone-700">
             {visibleIntents.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-stone-400 font-serif italic">
+                <td colSpan={7} className="text-center py-12 text-stone-400 font-serif italic">
                   No matching curated intents found. Try clicking "Run Intent Discovery" on Step 1, or click "New Intent" to add some!
                 </td>
               </tr>
@@ -226,17 +224,6 @@ export default function IntentCurationTab({
                     />
                   </td>
 
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => onUpdateIntent(item.id, { selected: !item.selected })}
-                      type="button"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-stone-100 rounded-none text-stone-400 hover:text-stone-700 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">
-                        {item.selected ? "check_box" : "check_box_outline_blank"}
-                      </span>
-                    </button>
-                  </td>
                 </tr>
               ))
             )}

@@ -138,7 +138,7 @@ class AgentLoopState(BaseModel):
     current_drafts: list[PersonaDraft] = Field(default_factory=list)
     evaluations: list[PersonaEvaluation] = Field(default_factory=list)
     iteration: int = Field(default=0)
-    max_iterations: int = Field(default=3)
+    max_iterations: int = Field(default=5)
     passed: bool = False
     history: list[dict[str, Any]] = Field(
         default_factory=list,
