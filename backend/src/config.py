@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_base_url: str = "https://cloud.langfuse.com"
     langfuse_capture_io: bool = False
+    apify_token: str = ""
 
     # LLM model ids (cấu hình được qua .env)
     gemini_model: str = "gemini-2.5-flash"
