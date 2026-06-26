@@ -5,6 +5,25 @@ export interface Intent {
   utterance: string;
   triggerMoment: string;
   selected: boolean;
+  // Gap analysis (Phase 1)
+  source?: 'data' | 'prd';
+  coverage?: '' | 'confirmed' | 'prd_only' | 'data_only';
+  matchedIds?: string[];
+}
+
+export interface IngestSource {
+  source_type: string;
+  filename: string;
+  rows_in: number;
+  rows_after_dedup: number;
+  status: string;
+}
+
+export interface IngestStats {
+  sources: IngestSource[];
+  prd_loaded: boolean;
+  total_chars: number;
+  warnings: string[];
 }
 
 export interface Persona {

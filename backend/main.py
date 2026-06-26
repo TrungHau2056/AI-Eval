@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routers.frontend_api import router as frontend_router
+from src.api.routers.crawl import router as crawl_router
 from src.observability.langfuse import flush_langfuse
 from src.api.routers.crawl import router as crawl_router
 

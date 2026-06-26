@@ -115,6 +115,7 @@ export default function Sidebar({
                 onChange={(e) => onAiModelChange(e.target.value)}
                 className="w-full bg-stone-50 text-stone-900 border border-stone-200 rounded-none px-3 py-2 text-xs focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all appearance-none cursor-pointer pr-8 font-serif italic"
               >
+                <option value="Gemini 1.5 Pro" className="bg-[#ffffff] text-stone-900">Gemini 1.5 Pro</option>
                 <option value="GPT-4o Enterprise" className="bg-[#ffffff] text-stone-900">GPT-4o Enterprise</option>
                 <option value="GPT-4-Turbo" className="bg-[#ffffff] text-stone-900">GPT-4-Turbo</option>
                 <option value="Claude 3.5 Sonnet" className="bg-[#ffffff] text-stone-900">Claude 3.5 Sonnet</option>

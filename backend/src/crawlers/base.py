@@ -39,17 +39,20 @@ class BaseCrawler(ABC):
             2. GET   /v2/actor-runs/{run_id}?waitForFinish  → đợi xong
             3. GET   /v2/datasets/{dataset_id}/items    → lấy kết quả
         """
-        headers = {"Content-Type": "application/json"}
-        params_auth = {"token": self.token}
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        # Authenticate via Authorization header (NOT a ?token= query param) so the
+        # Apify token never appears in httpx's INFO request-URL logs.
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}",
+        }
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as client:
             # ---- 1. Start the actor run ----
-            start_url = f"{self.base_url}/v2/acts/{actor_id}/runs"
+            safe_actor_id = actor_id.replace("/", "~")
+            start_url = f"{self.base_url}/v2/acts/{safe_actor_id}/runs"
             logger.info("Starting actor %s …", actor_id)
             resp = await client.post(
                 start_url,
-                params=params_auth,
                 json=run_input,
-                headers=headers,
             )
             resp.raise_for_status()
             run_data: dict = resp.json().get("data", {})
@@ -58,17 +61,30 @@ class BaseCrawler(ABC):
             logger.info("Actor %s started — run_id=%s, dataset=%s", actor_id, run_id, dataset_id)
             # ---- 2. Wait for the run to finish ----
             wait_url = f"{self.base_url}/v2/actor-runs/{run_id}"
-            wait_params = {**params_auth, "waitForFinish": str(wait_secs)}
-            resp = await client.get(wait_url, params=wait_params)
-            resp.raise_for_status()
-            status = resp.json().get("data", {}).get("status", "UNKNOWN")
-            logger.info("Actor %s finished — status=%s", actor_id, status)
+            
+            import time
+            start_time = time.time()
+            status = "UNKNOWN"
+            while True:
+                # Mỗi lần wait tối đa 60s do giới hạn của Apify API
+                wait_params = {"waitForFinish": "60"}
+                resp = await client.get(wait_url, params=wait_params)
+                resp.raise_for_status()
+                status = resp.json().get("data", {}).get("status", "UNKNOWN")
+                logger.info("Actor %s status=%s", actor_id, status)
+                
+                if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
+                    break
+                if time.time() - start_time > wait_secs:
+                    logger.warning("Actor %s wait timeout (%d s).", actor_id, wait_secs)
+                    break
+
             if status not in ("SUCCEEDED",):
                 logger.warning("Actor %s ended with status=%s — returning empty list.", actor_id, status)
                 return []
             # ---- 3. Fetch dataset items ----
             items_url = f"{self.base_url}/v2/datasets/{dataset_id}/items"
-            resp = await client.get(items_url, params=params_auth)
+            resp = await client.get(items_url)
             resp.raise_for_status()
             items: list[dict] = resp.json()
             logger.info("Actor %s returned %d items.", actor_id, len(items))

@@ -10,208 +10,26 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// Capture raw body as Buffer for ALL content types (JSON, multipart, binary)
+// so the proxy can forward uploads (multipart/form-data) untouched.
+app.use(express.raw({ type: "*/*", limit: "50mb" }));
 
-interface AppState {
-  apiKey: string;
-  domain: string;
-  aiModel: string;
-  intents: Intent[];
-  personas: Persona[];
-  testCases: TestCase[];
-}
+// Proxy all /api/* requests to the Python FastAPI backend
+app.all("/api/*", async (req, res) => {
+  try {
+    const targetUrl = `${BACKEND_URL}${req.originalUrl}`;
+    const headers: Record<string, string> = {};
+    // Preserve original Content-Type (keeps multipart boundary intact).
+    if (req.headers["content-type"]) headers["Content-Type"] = req.headers["content-type"] as string;
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization as string;
 
-// In-memory state store mimicking the screenshots' data
-let appState: AppState = {
-  apiKey: "••••••••••••••••",
-  domain: "qa-env-01.local",
-  aiModel: "GPT-4o Enterprise",
-  intents: [
-    {
-      id: "int-1",
-      name: "Check Billing History",
-      phase: "RETENTION" as const,
-      utterance: "I want to see how much I paid last June.",
-      triggerMoment: "Post-Login Dashboard",
-      selected: false,
-    },
-    {
-      id: "int-2",
-      name: "Update Profile Address",
-      phase: "ACCOUNT MGMT" as const,
-      utterance: "Change my shipping address to 123 Maple St.",
-      triggerMoment: "Settings View",
-      selected: true,
-    },
-    {
-      id: "int-3",
-      name: "Password Reset Flow",
-      phase: "SECURITY" as const,
-      utterance: "I forgot my password, send me a code.",
-      triggerMoment: "Login Fail State",
-      selected: false,
-    },
-    {
-      id: "int-4",
-      name: "Cancel Subscription",
-      phase: "CHURN" as const,
-      utterance: "Stop my monthly billing immediately.",
-      triggerMoment: "Subscription Panel",
-      selected: false,
-    },
-    {
-      id: "int-5",
-      name: "Bulk Data Export",
-      phase: "USAGE" as const,
-      utterance: "Download all records from last quarter as CSV.",
-      triggerMoment: "Reporting Module",
-      selected: true,
-    },
-    {
-      id: "int-6",
-      name: "Live Support Chat",
-      phase: "SUPPORT" as const,
-      utterance: "I need to talk to a human agent.",
-      triggerMoment: "Help Widget",
-      selected: false,
-    },
-  ],
-  personas: [
-    {
-      id: "p-1",
-      type: "happy" as const,
-      name: "Standard User",
-      trigger: "Login Successful",
-      utterance: "I want to view my recent billing history and download the PDF for June.",
-      frequency: 85,
-      pain: "Slow PDF rendering",
-      reject: "Incorrect credentials",
-      intentId: "int-1",
-    },
-    {
-      id: "p-2",
-      type: "edge" as const,
-      name: "Session Leaker",
-      trigger: "Expired Token",
-      utterance: "Attempting to refresh the dashboard after being inactive for 24 hours while on a VPN.",
-      frequency: 12,
-      pain: "Redundant re-logins",
-      reject: "401 Unauthorized",
-      intentId: "int-1",
-    },
-    {
-      id: "p-int-2-happy",
-      type: "happy" as const,
-      name: "Residential Relocator",
-      trigger: "Address fields filled",
-      utterance: "Change my shipping address to 123 Maple St and set it to default.",
-      frequency: 90,
-      pain: "Slow address completion suggestion",
-      reject: "Invalid zip code format",
-      intentId: "int-2",
-    },
-    {
-      id: "p-int-2-edge",
-      type: "edge" as const,
-      name: "Overseas Expat",
-      trigger: "Special characters in address field",
-      utterance: "Attempting to enter an international APO/FPO military address with custom state codes.",
-      frequency: 15,
-      pain: "Address length limitations",
-      reject: "Incorrect state province validation",
-      intentId: "int-2",
-    },
-    {
-      id: "p-int-5-happy",
-      type: "happy" as const,
-      name: "Financial Auditor",
-      trigger: "Export options selected",
-      utterance: "Download all records from last quarter as CSV for compliance filing.",
-      frequency: 80,
-      pain: "Filename auto-truncation issues",
-      reject: "Insufficient permissions for company export",
-      intentId: "int-5",
-    },
-    {
-      id: "p-int-5-edge",
-      type: "edge" as const,
-      name: "Automated Data Scraper",
-      trigger: "Recursive payload download trigger",
-      utterance: "Requesting a 10 Gigabyte compressed schema database dump repeatedly over a high-concurrency connection.",
-      frequency: 8,
-      pain: "Export timeout errors",
-      reject: "Rate limit threshold breached",
-      intentId: "int-5",
-    },
-  ],
-  testCases: [
-    {
-      id: "TC-XEDIEN-1.1",
-      intentName: "Update Profile Address",
-      personaName: "Persona A (Standard User)",
-      simulatedPrompt: "Change my shipping address to 123 Main St",
-      expectedOutcome: "Success message & database updated",
-      selected: true,
-      status: "pending" as const,
-      goal: "Validate profile address modification logic.",
-    },
-    {
-      id: "TC-XEDIEN-1.2",
-      intentName: "Password Reset Flow",
-      personaName: "Persona B (Session Leaker)",
-      simulatedPrompt: "I forgot my password, send me a reset link",
-      expectedOutcome: "Security email dispatched to user",
-      selected: true,
-      status: "pending" as const,
-      goal: "Assert user-initiated password authentication reset rules.",
-    },
-    {
-      id: "TC-XEDIEN-1.3",
-      intentName: "Bulk Data Export",
-      personaName: "Persona A (Standard User)",
-      simulatedPrompt: "Download all records from last month in JSON",
-      expectedOutcome: "File generation starts & progress bar",
-      selected: true,
-      status: "pending" as const,
-      goal: "Verify secure records bulk download capability.",
-    },
-  ],
-};
+    const fetchOptions: RequestInit = { method: req.method, headers };
 
-// Help-method to get Gemini AI Client
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-    console.log("No valid GEMINI_API_KEY environment variable found. Falling back to local/static responses.");
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build",
-      },
-    },
-  });
-}
-
-// 1. Get Application State
-app.get("/api/state", (req, res) => {
-  res.json(appState);
-});
-
-// 2. Put / Update Part of Application State
-app.post("/api/state", (req, res) => {
-  appState = { ...appState, ...req.body };
-  res.json({ success: true, state: appState });
-});
-
-// 2.5. Compile rule using user's natural prompt or uploaded MD context
-app.post("/api/compile-rule", async (req, res) => {
-  const { userPrompt, currentRule } = req.body;
-  if (!userPrompt || userPrompt.trim().length === 0) {
-    return res.status(400).json({ error: "Please provide a prompt to adjust the rules." });
-  }
+    const hasBody = req.method !== "GET" && req.method !== "HEAD" && Buffer.isBuffer(req.body) && req.body.length > 0;
+    if (hasBody) {
+      // Forward raw bytes as-is (works for JSON and multipart alike).
+      fetchOptions.body = req.body;
+    }
 
   const ai = getGeminiClient();
   if (!ai) {

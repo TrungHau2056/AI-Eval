@@ -8,7 +8,7 @@ import IntentCurationTab from "./components/IntentCurationTab";
 import PersonaPlaygroundTab from "./components/PersonaPlaygroundTab";
 import ExportTab from "./components/ExportTab";
 import RunningTestsModal from "./components/RunningTestsModal";
-import { Intent, Persona, TestCase } from "./types";
+import { Intent, Persona, TestCase, IngestStats } from "./types";
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -17,7 +17,7 @@ export default function App() {
   // App core state
   const [apiKey, setApiKey] = useState("••••••••••••••••");
   const [domain, setDomain] = useState("qa-env-01.local");
-  const [aiModel, setAiModel] = useState("GPT-4o Enterprise");
+  const [aiModel, setAiModel] = useState("Gemini 1.5 Pro");
   const [intents, setIntents] = useState<Intent[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -60,7 +60,7 @@ export default function App() {
         if (data) {
           setApiKey(data.apiKey || "");
           setDomain(data.domain || "");
-          setAiModel(data.aiModel || "GPT-4o Enterprise");
+          setAiModel(data.aiModel || "Gemini 1.5 Pro");
           setIntents(data.intents || []);
           setPersonas(data.personas || []);
           setTestCases(data.testCases || []);
@@ -112,6 +112,30 @@ export default function App() {
     showToast(`Diagnostic model hot-swapped to: ${val}`, "info");
   };
 
+  // Step 1a: Ingest multi-source files (server-side FormData → /api/ingest)
+  const handleIngest = async (
+    files: { file: File; sourceType: string }[],
+    prdFile: File | null,
+  ): Promise<IngestStats> => {
+    const fd = new FormData();
+    files.forEach(({ file, sourceType }) => {
+      fd.append("files", file);
+      fd.append("types", sourceType);
+    });
+    if (prdFile) fd.append("prd_file", prdFile);
+
+    const response = await fetch("/api/ingest", { method: "POST", body: fd });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || "Ingest failed.");
+    }
+    const stats: IngestStats = await response.json();
+    if (stats.warnings?.length) {
+      showToast(stats.warnings[0], "info");
+    }
+    return stats;
+  };
+
   // Step 1: Discover Intents
   const handleDiscover = async (text: string, ruleText?: string) => {
     try {
@@ -146,36 +170,54 @@ export default function App() {
     }
   };
 
-  // Discover Intents from Social Media Media Platform
-  const handleDiscoverSocial = async (platform: string, domain: string, isViral: boolean, keywords?: string[], ruleText?: string) => {
+  // Step 1b: Discover Intents from Social Media via the real Apify crawl backend
+  // (Python /api/crawl/{platform}). Returns { intents, crawlLogs, crawlPosts } so the
+  // DataIngestionTab trace panel can render the crawl pipeline output.
+  const handleCrawlSocial = async (
+    platform: string,
+    domain: string,
+    keywords?: string[],
+  ): Promise<{ crawlPosts: any[]; crawlLogs: string[] }> => {
+    // Crawl-only (extract_intents:false). Intents are produced later by Run Intent
+    // Discovery, which reads the crawled content the backend persists.
+    // Map UI platform label → crawl endpoint slug; default unknown → facebook.
+    const p = platform.toLowerCase();
+    let slug = "facebook";
+    if (p.includes("threads")) slug = "threads";
+    else if (p.includes("tiktok")) slug = "tiktok";
+    else if (p.includes("facebook")) slug = "facebook";
+
     try {
-      const response = await fetch("/api/discover-social", {
+      const response = await fetch(`/api/crawl/${slug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform, domain, isViral, keywords, ruleText }),
+        body: JSON.stringify({
+          platform,
+          domain,
+          keywords: keywords || [],
+          extract_intents: false,
+          model: aiModel,
+          api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,
+        }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to discover social intents.");
-      }
-
       const result = await response.json();
-      
-      const statsRes = await fetch("/api/state");
-      const freshState = await statsRes.json();
-      setIntents(freshState.intents || []);
-
-      if (result.fallback) {
-        showToast(`Demo Mode: Extracted typical social intents for ${platform} (${domain}).`, "info");
-      } else {
-        showToast(`Successfully extracted ${result.intents.length} social intents for ${platform}!`, "success");
+      if (!response.ok || result.error) {
+        throw new Error(result.detail || result.error || "Social crawl failed.");
       }
 
-      setCurrentStep(2); // Jump to curation screen automatically
+      const crawlPosts: any[] = result.crawl_posts || [];
+      if (crawlPosts.length > 0) {
+        showToast(`Crawled ${platform} → ${crawlPosts.length} posts collected!`, "success");
+      } else {
+        showToast(`Crawl finished for ${platform} but no posts were returned.`, "info");
+      }
+
+      return { crawlPosts, crawlLogs: result.crawl_logs ?? [] };
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Social Intent discovery failed.", "error");
+      showToast(err.message || "Social crawl failed.", "error");
+      return { crawlPosts: [], crawlLogs: [String(err.message || err)] };
     }
   };
 
@@ -522,7 +564,9 @@ export default function App() {
             {currentStep === 1 && (
               <DataIngestionTab
                 onDiscover={handleDiscover}
-                onDiscoverSocial={handleDiscoverSocial}
+                onIngest={handleIngest}
+                onCrawlSocial={handleCrawlSocial}
+                onProceedToCuration={() => setCurrentStep(2)}
                 ruleText={intentRule}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");

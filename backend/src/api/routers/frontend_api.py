@@ -1,13 +1,17 @@
 import asyncio
+import io
 import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.api.deps import get_memory, get_state, reset_state
 from src.config import settings
+from src.ingestion.loader_factory import get_loader
+from src.ingestion.normalizer import merge_sources
+from src.ingestion.prd_loader import PRDLoader
 from src.llm.factory import create_llm_client
 from src.models.schemas import (
     FEIntent,
@@ -18,6 +22,7 @@ from src.models.schemas import (
     RawInput,
     TestCasePrompt,
 )
+from src.pipeline.intent_comparator import IntentComparator
 from src.pipeline.intent_extractor import IntentAgent
 from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
@@ -124,6 +129,9 @@ def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
             utterance=r.get("utterance", ""),
             triggerMoment=r.get("moment", r.get("context", "")),
             selected=True,
+            source=r.get("source") if r.get("source") in ("data", "prd") else "data",
+            coverage=r.get("coverage", ""),
+            matchedIds=r.get("matchedIds", []) or [],
         ))
     return mapped
 
@@ -222,45 +230,149 @@ def update_state(body: StateUpdateRequest):
     }
 
 
+@router.post("/api/ingest")
+async def ingest_sources(
+    files: list[UploadFile] = File(default=[]),
+    types: list[str] = Form(default=[]),
+    prd_file: UploadFile | None = File(default=None),
+):
+    """Nạp nhiều file đa nguồn → merge data thật vào state.raw_input + tách PRD.
+
+    files[i] ↔ types[i] (song song). File type=prd (hoặc prd_file) → PRDLoader.
+    Per-file graceful skip: lỗi/0 dòng → status "skipped" + warning, không fail cả mẻ.
+    """
+    logger.info("POST /api/ingest | files=%d | prd_file=%s", len(files), bool(prd_file))
+    state = get_state()
+    sources: list[dict] = []
+    warnings: list[str] = []
+    data_inputs: list[RawInput] = []
+    prd_loaded = False
+
+    for idx, uf in enumerate(files):
+        filename = uf.filename or f"file_{idx}"
+        source_type = types[idx].lower() if idx < len(types) and types[idx] else None
+        raw_bytes = await uf.read()
+        try:
+            if source_type == "prd":
+                ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
+                state.raw_prd_content = ri.content
+                prd_loaded = True
+                sources.append({"source_type": "prd", "filename": filename,
+                                "rows_in": 0, "rows_after_dedup": 0, "status": "ok"})
+                continue
+            loader = get_loader(source_type=source_type, filename=filename,
+                                uploaded_file=io.BytesIO(raw_bytes))
+            ri = loader.load()
+            rows_in = ri.metadata.get("rows", ri.content.count("\n---\n") + 1)
+            data_inputs.append(ri)
+            sources.append({"source_type": ri.source_type, "filename": filename,
+                            "rows_in": rows_in, "rows_after_dedup": rows_in, "status": "ok"})
+        except Exception as e:
+            logger.warning("Ingest skip %s: %s", filename, e)
+            warnings.append(f"{filename}: {e} → skip")
+            sources.append({"source_type": source_type or "?", "filename": filename,
+                            "rows_in": 0, "rows_after_dedup": 0, "status": "skipped"})
+
+    if prd_file is not None:
+        filename = prd_file.filename or "prd"
+        try:
+            raw_bytes = await prd_file.read()
+            ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
+            state.raw_prd_content = ri.content
+            prd_loaded = True
+            sources.append({"source_type": "prd", "filename": filename,
+                            "rows_in": 0, "rows_after_dedup": 0, "status": "ok"})
+        except Exception as e:
+            logger.warning("Ingest PRD skip %s: %s", filename, e)
+            warnings.append(f"{filename}: {e} → skip")
+
+    if data_inputs:
+        merged = merge_sources(data_inputs)
+        state.raw_input = merged
+        total_chars = len(merged.content)
+    else:
+        total_chars = len(state.raw_prd_content)
+
+    if not data_inputs and not prd_loaded:
+        raise HTTPException(400, "Không có file hợp lệ nào được nạp (tất cả skip).")
+
+    return {
+        "sources": sources,
+        "prd_loaded": prd_loaded,
+        "total_chars": total_chars,
+        "warnings": warnings,
+    }
+
+
+async def _mine_intents(content: str, guidance: str, llm, memory_name: str) -> list[dict]:
+    agent = IntentAgent(llm, memory=get_memory(memory_name), max_chunk_tokens=settings.chunk_max_tokens)
+    if guidance:
+        agent.add_feedback(f"Extract intents: {guidance}")
+    return await agent.run(RawInput(source_type="text", content=content), guidance)
+
+
 @router.post("/api/discover")
 def discover_intents(req: DiscoverRequest):
     logger.info("POST /api/discover | logsText_length=%d | ruleText=%s", len(req.logsText), bool(req.ruleText))
-    if not req.logsText or not req.logsText.strip():
+    state = get_state()
+
+    # Data content from all available sources: paste-text (ưu tiên) hoặc raw_input đã
+    # ingest, GỘP THÊM dữ liệu social đã crawl (state.raw_social_content). Không gắn nhãn
+    # nguồn ở vòng này — chỉ nối nội dung lại để mine intents.
+    parts: list[str] = []
+    if req.logsText and req.logsText.strip():
+        state.raw_input = RawInput(source_type="text", content=req.logsText)
+        parts.append(req.logsText)
+    elif state.raw_input and state.raw_input.content:
+        parts.append(state.raw_input.content)
+    if state.raw_social_content and state.raw_social_content.strip():
+        parts.append(state.raw_social_content)
+    data_content = "\n\n".join(p for p in parts if p and p.strip())
+
+    prd_content = state.raw_prd_content
+    if not data_content.strip() and not prd_content.strip():
         raise HTTPException(400, "Please enter some logs text or upload a file first.")
 
-    state = get_state()
-    state.raw_input = RawInput(source_type="text", content=req.logsText)
+    # Mine data ĐỘC LẬP với PRD: chỉ dùng ruleText do user đặt, KHÔNG nhét nội
+    # dung PRD vào guidance (nếu nhét, data_intents sẽ phản chiếu PRD → "all
+    # confirmed", che mất intent thật của data → hỏng gap analysis).
+    guidance = req.ruleText or ""
 
     model = _get_model()
     api_key = _resolve_api_key(model)
-    logger.info("Discovering intents | model=%s | input_length=%d", model, len(req.logsText))
-
     try:
         llm = create_llm_client(model, api_key)
     except ValueError as e:
         logger.error("Failed to create LLM client: %s", e)
         raise HTTPException(400, str(e))
 
-    agent = IntentAgent(llm, memory=get_memory("intent"), max_chunk_tokens=settings.chunk_max_tokens)
-    if req.ruleText:
-        agent.add_feedback(f"Extract intents: {req.ruleText}")
+    async def _run() -> tuple[list[dict], list[dict]]:
+        data_intents: list[dict] = []
+        prd_intents: list[dict] = []
+        if data_content.strip():
+            data_intents = await _mine_intents(data_content, guidance, llm, "intent")
+        if prd_content.strip():
+            prd_intents = await _mine_intents(prd_content, "", llm, "intent_prd")
+        if data_intents or prd_intents:
+            comparator = IntentComparator(llm, api_key)
+            prd_intents, data_intents = await comparator.compare(prd_intents, data_intents)
+        return data_intents, prd_intents
 
     loop = asyncio.new_event_loop()
     try:
-        logger.info("Starting IntentAgent.run() ...")
-        results = loop.run_until_complete(agent.run(state.raw_input, req.ruleText))
-        logger.info("IntentAgent.run() completed | raw_results=%d", len(results))
+        logger.info("Starting discovery (data + prd + comparator) ...")
+        data_intents, prd_intents = loop.run_until_complete(_run())
     except Exception as e:
-        logger.error("IntentAgent.run() failed: %s", e, exc_info=True)
+        logger.error("Discovery failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Intent: {e}")
     finally:
         loop.close()
 
+    results = data_intents + prd_intents
     fe_intents = _map_pipeline_intents_to_fe(results)
     state.intents = fe_intents
-    # Also store internal intents for persona generation
     state.internal_intents = [Intent(**r) for r in results]
-    logger.info("Stored %d FE intents in state", len(fe_intents))
+    logger.info("Stored %d FE intents (data=%d, prd=%d)", len(fe_intents), len(data_intents), len(prd_intents))
 
     return {"intents": [i.model_dump() for i in fe_intents], "fallback": False}
 

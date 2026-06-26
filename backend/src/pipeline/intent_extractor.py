@@ -239,6 +239,7 @@ class IntentAgent:
         return results
 
     def _deduplicate(self, intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dedup exact (case-insensitive) TRONG cùng 1 nguồn. Giữ bản đầu."""
         seen: set[str] = set()
         result: list[dict[str, Any]] = []
         for intent in intents:
@@ -247,3 +248,12 @@ class IntentAgent:
                 seen.add(key)
                 result.append(intent)
         return result
+
+    def dedup_semantic(self, intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Hook tích hợp so khớp ngữ nghĩa (FR-B4).
+
+        Mặc định no-op: đối chiếu chéo PRD↔data do IntentComparator đảm nhận
+        (KHÔNG gộp ở đây để tránh che mất tín hiệu Confirmed). Giữ điểm cắm cho
+        dedup ngữ nghĩa trong-nguồn ở vòng sau nếu cần.
+        """
+        return intents

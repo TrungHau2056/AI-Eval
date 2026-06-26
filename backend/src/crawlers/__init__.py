@@ -7,4 +7,6 @@ Usage:
 """
 from src.crawlers.base import BaseCrawler
 from src.crawlers.facebook_crawler import FacebookCrawler
-__all__ = ["BaseCrawler", "FacebookCrawler"]
+from src.crawlers.threads_crawler import ThreadsCrawler
+
+__all__ = ["BaseCrawler", "FacebookCrawler", "ThreadsCrawler"]

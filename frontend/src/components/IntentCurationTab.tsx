@@ -19,6 +19,14 @@ export default function IntentCurationTab({
   ruleText,
   onOpenRuleModal
 }: IntentCurationTabProps) {
+  const [coverageFilter, setCoverageFilter] = useState<string>("all");
+
+  const COVERAGE_BADGES: Record<string, { label: string; cls: string }> = {
+    confirmed: { label: "✅ Confirmed", cls: "bg-emerald-100 text-emerald-800 border border-emerald-200/50" },
+    data_only: { label: "⚠️ Data-only", cls: "bg-amber-100 text-amber-800 border border-amber-200/50" },
+    prd_only: { label: "◻️ PRD-only", cls: "bg-stone-100 text-stone-600 border border-stone-300/50" },
+  };
+
   const getPhaseStyle = (phase: string) => {
     if (!phase) return "bg-stone-100 text-stone-600 border border-stone-200/50";
     const hash = phase.toLowerCase().split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -43,6 +51,9 @@ export default function IntentCurationTab({
   };
 
   const selectedCount = intents.filter((i) => i.selected).length;
+  const hasCoverage = intents.some((i) => i.coverage);
+  const visibleIntents =
+    coverageFilter === "all" ? intents : intents.filter((i) => (i.coverage || "") === coverageFilter);
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -70,6 +81,21 @@ export default function IntentCurationTab({
         <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between bg-stone-50/70">
           <div className="flex items-center gap-4">
             <h2 className="text-[13px] font-bold text-stone-800 uppercase tracking-[0.2em]">Curation Queue</h2>
+            {hasCoverage && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">Coverage:</span>
+                <select
+                  value={coverageFilter}
+                  onChange={(e) => setCoverageFilter(e.target.value)}
+                  className="text-[11px] font-mono uppercase tracking-wider border border-stone-300 bg-white px-2 py-1 outline-none focus:border-[#ff4d00] cursor-pointer"
+                >
+                  <option value="all">All</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="prd_only">PRD-only</option>
+                  <option value="data_only">Data-only</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -103,22 +129,24 @@ export default function IntentCurationTab({
                   className="w-4 h-4 rounded-none bg-white border-stone-300 text-[#ff4d00] focus:ring-[#ff4d00]"
                 />
               </th>
-              <th className="px-4 py-3 w-[250px]">Intent Name</th>
-              <th className="px-4 py-3 w-[150px]">Phase</th>
+              <th className="px-4 py-3 w-[230px]">Intent Name</th>
+              <th className="px-4 py-3 w-[90px]">Source</th>
+              <th className="px-4 py-3 w-[130px]">Coverage</th>
+              <th className="px-4 py-3 w-[130px]">Phase</th>
               <th className="px-4 py-3">Utterance (Typical User Ask)</th>
-              <th className="px-4 py-3 w-[250px]">Trigger Moment</th>
+              <th className="px-4 py-3 w-[230px]">Trigger Moment</th>
               <th className="px-4 py-3 w-16"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 text-stone-700">
-            {intents.length === 0 ? (
+            {visibleIntents.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-12 text-stone-400 font-serif italic">
+                <td colSpan={8} className="text-center py-12 text-stone-400 font-serif italic">
                   No matching curated intents found. Try clicking "Run Intent Discovery" on Step 1, or click "New Intent" to add some!
                 </td>
               </tr>
             ) : (
-              intents.map((item) => (
+              visibleIntents.map((item) => (
                 <tr
                   key={item.id}
                   className={`group transition-colors ${
@@ -142,6 +170,28 @@ export default function IntentCurationTab({
                       onChange={(e) => onUpdateIntent(item.id, { name: e.target.value })}
                       className="bg-transparent border-none p-0 text-[13px] font-semibold text-stone-900 w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00]"
                     />
+                  </td>
+
+                  {/* Source cell (PRD / Data) */}
+                  <td className="px-4 py-2">
+                    {item.source && (
+                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none ${
+                        item.source === "prd"
+                          ? "bg-indigo-100 text-indigo-800 border border-indigo-200/50"
+                          : "bg-sky-100 text-sky-800 border border-sky-200/50"
+                      }`}>
+                        {item.source}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Coverage badge cell */}
+                  <td className="px-4 py-2">
+                    {item.coverage && COVERAGE_BADGES[item.coverage] && (
+                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none whitespace-nowrap ${COVERAGE_BADGES[item.coverage].cls}`}>
+                        {COVERAGE_BADGES[item.coverage].label}
+                      </span>
+                    )}
                   </td>
 
                   {/* Phase selector dropdown cell */}
