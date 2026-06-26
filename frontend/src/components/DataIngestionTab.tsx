@@ -16,7 +16,7 @@ interface DataIngestionTabProps {
     platform: string,
     domain: string,
     keywords?: string[],
-  ) => Promise<{ crawlPosts: any[]; crawlLogs: string[] }>;
+  ) => Promise<{ crawlPosts: any[]; newCrawlPosts: any[]; crawlLogs: string[] }>;
   ruleText: string;
   onOpenRuleModal: () => void;
   onProceedToCuration?: () => void;
@@ -27,43 +27,59 @@ const SOURCE_OPTIONS = ["survey", "social", "text"];
 // Selectable social platforms (multi-select checkboxes).
 const PLATFORMS = ["Facebook", "Threads", "TikTok"];
 
-// Pre-defined domains and their initial hashtags (kept in Vietnamese — used as real crawl keywords).
+const normalizeKeyword = (raw: string): string =>
+  raw.replace(/#/g, "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
+const normalizeKeywords = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of items) {
+    const clean = normalizeKeyword(item);
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      normalized.push(clean);
+    }
+  }
+  return normalized;
+};
+
+// Pre-defined domains and their default search keywords (plain text, used as real crawl queries).
 const PRESET_DOMAINS = [
   {
     id: "du-lich",
     label: "Du lịch",
     icon: "explore",
-    tags: ["#hủy_vé", "#khách_sạn", "#vũng_tàu", "#đà_lạt", "#tour_giá_rẻ", "#hành_lý"]
+    tags: ["hủy vé", "khách sạn", "vũng tàu", "đà lạt", "tour giá rẻ", "hành lý"]
   },
   {
     id: "giai-tri",
     label: "Giải trí",
     icon: "theater_comedy",
-    tags: ["#concert", "#netflix", "#bản_quyền", "#vé_vip", "#livestream", "#phim_bom_tấn"]
+    tags: ["concert", "netflix", "bản quyền", "vé vip", "livestream", "phim bom tấn"]
   },
   {
     id: "the-thao",
     label: "Thể thao",
     icon: "sports_soccer",
-    tags: ["#marathon", "#đăng_ký_bib", "#giải_chạy", "#gym_card", "#gián_đoạn", "#bóng_đá"]
+    tags: ["marathon", "đăng ký bib", "giải chạy", "gym card", "gián đoạn", "bóng đá"]
   },
   {
     id: "cong-nghe",
     label: "Công nghệ",
     icon: "devices",
-    tags: ["#lỗi_app", "#cập_nhật", "#bảo_mật", "#api_key", "#lag", "#crash"]
+    tags: ["lỗi app", "cập nhật", "bảo mật", "api key", "lag", "crash"]
   },
   {
     id: "tai-chinh",
     label: "Tài chính",
     icon: "payments",
-    tags: ["#giao_dịch", "#hoàn_tiền", "#lãi_suất", "#thanh_toán", "#bị_khóa", "#mã_otp"]
+    tags: ["giao dịch", "hoàn tiền", "lãi suất", "thanh toán", "bị khóa", "mã otp"]
   },
   {
     id: "giao-duc",
     label: "Giáo dục",
     icon: "school",
-    tags: ["#khóa_học", "#học_phí", "#chứng_chỉ", "#thi_thử", "#tài_liệu", "#đăng_ký"]
+    tags: ["khóa học", "học phí", "chứng chỉ", "thi thử", "tài liệu", "đăng ký"]
   }
 ];
 
@@ -109,15 +125,29 @@ export default function DataIngestionTab({
   // Active platforms preserving the canonical order.
   const getActivePlatforms = () => PLATFORMS.filter((p) => selectedPlatforms.includes(p));
 
-  // Auto-populate hashtags when preset domain changes
+  // Load persisted crawl sheet from backend JSON store on mount.
+  useEffect(() => {
+    fetch("/api/crawl/posts")
+      .then((res) => res.json())
+      .then((data) => {
+        const posts = data?.posts || [];
+        if (posts.length > 0) {
+          setCrawledPosts(posts);
+          setSocialResultsText(`${posts.length} posts loaded from saved crawl data.`);
+        }
+      })
+      .catch((err) => console.error("Failed to load saved crawl posts:", err));
+  }, []);
+
+  // Auto-populate keywords when preset domain changes
   useEffect(() => {
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setKeywords([...found.tags]);
+        setKeywords(normalizeKeywords(found.tags));
       }
     } else {
-      setKeywords(["#yêu_cầu_mới", "#góp_ý", "#hỗ_trợ"]);
+      setKeywords(normalizeKeywords(["yêu cầu mới", "góp ý", "hỗ trợ"]));
     }
   }, [selectedDomainId, isCustomDomain]);
 
@@ -207,37 +237,32 @@ export default function DataIngestionTab({
     }
 
     setSocialLoading(true);
-    setSocialResultsText(""); // Reset previous results
 
-    // Determine exact platform list and domain to send to API.
-    const finalPlatform = activeList.join(", ");
     const finalDomain = isCustomDomain ? (customDomainLabel.trim() || "Lĩnh vực Tùy chỉnh") : (PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label || "Du lịch");
+    const normalizedKeywords = normalizeKeywords(keywords);
+    const crawlLogs: string[] = [];
+    let mergedPosts: any[] = [...crawledPosts];
+    let totalNew = 0;
 
     try {
-      const result = await onCrawlSocial(finalPlatform, finalDomain, keywords);
-      let postsToSave: any[] = result?.crawlPosts ? [...result.crawlPosts] : [];
-
-      // Demo fallback when the crawler returns nothing (e.g. no Apify token): build a
-      // few placeholder rows from the keywords so the sheet isn't blank in demo mode.
-      if (postsToSave.length === 0) {
-        const dates = ["2026-06-25", "2026-06-24", "2026-06-23", "2026-06-22", "2026-06-20"];
-        const sampleTexts = keywords.length > 0 ? keywords : ["#feedback", "#support", "#issue"];
-        postsToSave = sampleTexts.map((kw: string, index: number) => {
-          const postPlatform = activeList[index % activeList.length] || "Facebook";
-          return {
-            platform: postPlatform,
-            url: `https://www.${postPlatform.toLowerCase().replace(/\s+/g, "")}.com/groups/${finalDomain.toLowerCase().replace(/\s+/g, "")}/posts/demo_${index}`,
-            postingDate: dates[index % dates.length],
-            text: `Thảo luận mẫu liên quan đến ${kw} trên ${postPlatform}.`,
-            likes: Math.floor(Math.random() * 500) + 50,
-            commentsCount: Math.floor(Math.random() * 150) + 10,
-          };
-        });
+      for (const platform of activeList) {
+        const result = await onCrawlSocial(platform, finalDomain, normalizedKeywords);
+        if (result?.crawlPosts?.length) {
+          mergedPosts = result.crawlPosts;
+        }
+        totalNew += result?.newCrawlPosts?.length || 0;
+        crawlLogs.push(...(result?.crawlLogs ?? []));
       }
 
-      setCrawledPosts(postsToSave);
-      // Non-empty marker just to reveal the results banner.
-      setSocialResultsText(`Crawled ${postsToSave.length} posts from ${finalPlatform}.`);
+      setCrawledPosts(mergedPosts);
+      if (totalNew > 0) {
+        setSocialResultsText(`Crawled ${totalNew} new posts (${mergedPosts.length} total in sheet).`);
+        setIsSheetModalOpen(true);
+      } else {
+        setSocialResultsText(mergedPosts.length > 0 ? `${mergedPosts.length} posts in sheet (no new posts this run).` : "");
+        const detail = crawlLogs.length > 0 ? crawlLogs.join(" ") : "No posts matched the selected keywords.";
+        alert(`Crawl finished but returned 0 new posts. ${detail}`);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -251,8 +276,8 @@ export default function DataIngestionTab({
     const clean = newKeywordInput.trim();
     if (!clean) return;
 
-    // Add '#' prefix if missing
-    const formatted = clean.startsWith("#") ? clean : `#${clean}`;
+    const formatted = normalizeKeyword(clean);
+    if (!formatted) return;
     if (!keywords.includes(formatted)) {
       setKeywords([...keywords, formatted]);
     }
@@ -269,10 +294,10 @@ export default function DataIngestionTab({
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setKeywords([...found.tags]);
+        setKeywords(normalizeKeywords(found.tags));
       }
     } else {
-      setKeywords(["#yêu_cầu_mới", "#góp_ý", "#hỗ_trợ"]);
+      setKeywords(normalizeKeywords(["yêu cầu mới", "góp ý", "hỗ trợ"]));
     }
   };
 
@@ -565,12 +590,12 @@ export default function DataIngestionTab({
                 </div>
               </div>
 
-              {/* Keywords & Hashtags Manager section */}
+              {/* Keywords manager */}
               <div className="flex flex-col gap-2 p-4 bg-white border border-stone-200">
                 <div className="flex items-center justify-between border-b border-stone-100 pb-2">
                   <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-[14px] text-stone-400">tag</span>
-                    Hashtags & Search keywords ({keywords.length})
+                    Search keywords ({keywords.length})
                   </label>
                   <button
                     type="button"
@@ -586,8 +611,8 @@ export default function DataIngestionTab({
                   <input
                     type="text"
                     value={newKeywordInput}
-                    onChange={(e) => setNewKeywordInput(e.target.value)}
-                    placeholder="Add a new keyword or hashtag (e.g. #giá_vé)"
+                    onChange={(e) => setNewKeywordInput(e.target.value.replace(/#/g, ""))}
+                    placeholder="Add a new keyword (e.g. giá vé)"
                     className="flex-grow bg-stone-50 border border-stone-200 px-3 py-1.5 text-[11px] font-mono focus:border-[#ff4d00] outline-none"
                   />
                   <button
@@ -879,30 +904,27 @@ export default function DataIngestionTab({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    const headers = ["Platform", "URL", "Posting Date", "Likes", "Comments", "Content"];
-                    const rows = crawledPosts.map(post => [
-                      post.platform || getActivePlatforms()[0] || "Facebook",
-                      post.url || "",
-                      post.postingDate || "",
-                      post.likes || 0,
-                      post.commentsCount || 0,
-                      `"${(post.text || "").replace(/"/g, '""')}"`
-                    ]);
-                    const csvContent = "data:text/csv;charset=utf-8,﻿"
-                      + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-                    const encodedUri = encodeURI(csvContent);
-                    const link = document.createElement("a");
-                    link.setAttribute("href", encodedUri);
-                    const downloadName = `crawled_posts_${(getActivePlatforms()[0] || "social").toLowerCase()}_${Date.now()}.csv`;
-                    link.setAttribute("download", downloadName);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/api/crawl/posts");
+                      const data = await res.json();
+                      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `crawl_posts_${Date.now()}.json`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      console.error("Download failed:", err);
+                      alert("Failed to download crawl data.");
+                    }
                   }}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-700 text-[10px] uppercase font-bold tracking-widest cursor-pointer transition-colors"
                 >
-                  Download Excel/CSV
+                  Download JSON
                 </button>
                 <button
                   type="button"

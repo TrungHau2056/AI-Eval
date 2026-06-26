@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.api.deps import get_memory, get_state, reset_state
+from src.crawlers.crawl_store import clear_posts
 from src.config import settings
 from src.ingestion.loader_factory import get_loader
 from src.ingestion.normalizer import merge_sources
@@ -519,6 +520,7 @@ def generate_testcases(req: GenerateTestCasesRequest):
 def reset_pipeline():
     logger.info("POST /api/state/reset")
     state = reset_state()
+    clear_posts()
     return {
         "success": True,
         "state": {

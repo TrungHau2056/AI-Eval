@@ -52,23 +52,24 @@ export default function App() {
   const [viewingTestCase, setViewingTestCase] = useState<TestCase | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
 
-  // Fetch initial state from the full-stack server
+  // Reset backend state on every page load (F5) so each reload = fresh session.
+  // Within a session, crawling multiple platforms still accumulates data normally.
   useEffect(() => {
-    fetch("/api/state")
+    fetch("/api/state/reset", { method: "POST" })
       .then((res) => res.json())
       .then((data) => {
-        if (data) {
-          setApiKey(data.apiKey || "");
-          setDomain(data.domain || "");
-          setAiModel(data.aiModel || "Gemini 1.5 Pro");
-          setIntents(data.intents || []);
-          setPersonas(data.personas || []);
-          setTestCases(data.testCases || []);
+        if (data?.state) {
+          setApiKey(data.state.apiKey || "");
+          setDomain(data.state.domain || "");
+          setAiModel(data.state.aiModel || "Gemini 1.5 Pro");
+          setIntents(data.state.intents || []);
+          setPersonas(data.state.personas || []);
+          setTestCases(data.state.testCases || []);
         }
       })
       .catch((err) => {
-        console.error("Failed to load initial state:", err);
-        showToast("Error loading enterprise database state.", "error");
+        console.error("Failed to reset session state:", err);
+        showToast("Error initializing fresh session.", "error");
       });
   }, []);
 
@@ -170,22 +171,20 @@ export default function App() {
     }
   };
 
-  // Step 1b: Discover Intents from Social Media via the real Apify crawl backend
-  // (Python /api/crawl/{platform}). Returns { intents, crawlLogs, crawlPosts } so the
-  // DataIngestionTab trace panel can render the crawl pipeline output.
+  // Step 1b: Crawl one social platform; backend prepends results to JSON store + returns full sheet.
+  const platformToSlug = (platform: string): string => {
+    const p = platform.toLowerCase();
+    if (p.includes("threads")) return "threads";
+    if (p.includes("tiktok")) return "tiktok";
+    return "facebook";
+  };
+
   const handleCrawlSocial = async (
     platform: string,
     domain: string,
     keywords?: string[],
-  ): Promise<{ crawlPosts: any[]; crawlLogs: string[] }> => {
-    // Crawl-only (extract_intents:false). Intents are produced later by Run Intent
-    // Discovery, which reads the crawled content the backend persists.
-    // Map UI platform label → crawl endpoint slug; default unknown → facebook.
-    const p = platform.toLowerCase();
-    let slug = "facebook";
-    if (p.includes("threads")) slug = "threads";
-    else if (p.includes("tiktok")) slug = "tiktok";
-    else if (p.includes("facebook")) slug = "facebook";
+  ): Promise<{ crawlPosts: any[]; newCrawlPosts: any[]; crawlLogs: string[] }> => {
+    const slug = platformToSlug(platform);
 
     try {
       const response = await fetch(`/api/crawl/${slug}`, {
@@ -206,18 +205,23 @@ export default function App() {
         throw new Error(result.detail || result.error || "Social crawl failed.");
       }
 
+      const newCrawlPosts: any[] = result.new_crawl_posts || [];
       const crawlPosts: any[] = result.crawl_posts || [];
-      if (crawlPosts.length > 0) {
-        showToast(`Crawled ${platform} → ${crawlPosts.length} posts collected!`, "success");
+      if (newCrawlPosts.length > 0) {
+        showToast(`Crawled ${platform} → ${newCrawlPosts.length} new posts (${crawlPosts.length} total in sheet).`, "success");
       } else {
-        showToast(`Crawl finished for ${platform} but no posts were returned.`, "info");
+        showToast(`Crawl finished for ${platform} but no new posts were returned.`, "info");
       }
 
-      return { crawlPosts, crawlLogs: result.crawl_logs ?? [] };
+      return {
+        crawlPosts,
+        newCrawlPosts,
+        crawlLogs: result.crawl_logs ?? [],
+      };
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Social crawl failed.", "error");
-      return { crawlPosts: [], crawlLogs: [String(err.message || err)] };
+      return { crawlPosts: [], newCrawlPosts: [], crawlLogs: [String(err.message || err)] };
     }
   };
 

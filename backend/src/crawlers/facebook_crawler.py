@@ -8,15 +8,21 @@ Output là 1 string formatted sẵn sàng cho IntentAgent.
 from __future__ import annotations
 import logging
 import json
+from datetime import datetime, timezone
 from typing import Any
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import BaseCrawler, coerce_text
 
 logger = logging.getLogger(__name__)
 
-# Actor IDs (Apify Store) — pay-per-event, works on free plan credits
-AUTOCOMPLETE_ACTOR = "automation-lab/google-autocomplete-scraper"
-SEARCH_ACTOR = "scraper_one/facebook-posts-search"
+# Search actor chain:
+#   1. scrapeforge/facebook-search-posts (primary)
+#   2. igview-owner/facebook-old-posts-search (fallback when primary returns 0 rows)
+#   3. scraper_one/facebook-posts-search (legacy fallback)
+SEARCH_ACTOR = "scrapeforge/facebook-search-posts"
+FALLBACK_SEARCH_ACTOR = "igview-owner/facebook-old-posts-search"
+LEGACY_SEARCH_ACTOR = "scraper_one/facebook-posts-search"
 POSTS_ACTOR = "apify/facebook-posts-scraper"
+AUTOCOMPLETE_ACTOR = "automation-lab/google-autocomplete-scraper"
 
 
 class FacebookCrawler(BaseCrawler):
@@ -70,7 +76,7 @@ class FacebookCrawler(BaseCrawler):
             )
             if isinstance(results, list):
                 for r in results:
-                    text = r if isinstance(r, str) else r.get("value", r.get("text", ""))
+                    text = coerce_text(r) if not isinstance(r, str) else r.strip()
                     if text and text not in suggestions:
                         suggestions.append(text)
 
@@ -84,20 +90,74 @@ class FacebookCrawler(BaseCrawler):
         query: str,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Tìm bài viết Facebook qua scraper_one/facebook-posts-search."""
+        """Search Facebook posts — primary actor, then igview fallback, then legacy."""
         limit = limit or self.search_limit
+
+        try:
+            items = await self._run_actor(SEARCH_ACTOR, {
+                "query": query,
+                "maxResults": limit,
+            })
+            filtered = self._filter_search_items(items)
+            if filtered:
+                logger.info("Primary search '%s' → %d results.", query, len(filtered))
+                return filtered
+        except Exception as exc:
+            logger.error("Primary search failed for '%s': %s", query, exc)
+
+        logger.warning(
+            "Primary search actor returned 0 rows for '%s' — trying igview fallback.",
+            query,
+        )
+        fallback = self._filter_search_items(await self._igview_search_posts(query, limit))
+        if fallback:
+            logger.info("Igview fallback search '%s' → %d results.", query, len(fallback))
+            return fallback
+
+        logger.warning(
+            "Igview fallback returned 0 rows for '%s' — trying legacy actor.",
+            query,
+        )
+        legacy = self._filter_search_items(await self._legacy_search_posts(query, limit))
+        if legacy:
+            logger.info("Legacy search '%s' → %d results.", query, len(legacy))
+        else:
+            logger.warning("All search actors returned 0 rows for '%s'.", query)
+        return legacy
+
+    async def _igview_search_posts(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """Fallback search via igview-owner/facebook-old-posts-search."""
+        run_input: dict[str, Any] = {
+            "query": query,
+            "maxResults": limit,
+        }
+        try:
+            return await self._run_actor(FALLBACK_SEARCH_ACTOR, run_input)
+        except Exception as exc:
+            logger.error("Igview fallback search failed for '%s': %s", query, exc)
+            return []
+
+    async def _legacy_search_posts(self, query: str, limit: int) -> list[dict[str, Any]]:
         run_input: dict[str, Any] = {
             "query": query,
             "resultsCount": limit,
             "searchType": "top",
         }
         try:
-            items = await self._run_actor(SEARCH_ACTOR, run_input)
+            return await self._run_actor(LEGACY_SEARCH_ACTOR, run_input)
         except Exception as exc:
-            logger.error("Search failed for '%s': %s", query, exc)
+            logger.error("Legacy search failed for '%s': %s", query, exc)
             return []
-        logger.info("Search '%s' → %d results.", query, len(items))
-        return items
+
+    @staticmethod
+    def _filter_search_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        valid: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("error"):
+                continue
+            if FacebookCrawler._extract_post_url(item):
+                valid.append(item)
+        return valid
 
     async def scrape_posts(
         self,
@@ -161,17 +221,21 @@ class FacebookCrawler(BaseCrawler):
                 logger.warning("No search results for keyword '%s' — skipping.", keyword)
                 continue
 
+            posts_with_text = [item for item in search_results if self._extract_text(item)]
+            if posts_with_text:
+                all_posts.extend(posts_with_text)
+                continue
+
             urls: list[str] = []
             for item in search_results:
                 url = self._extract_post_url(item)
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
-            # Giới hạn số URL deep-scrape đúng bằng posts_limit để tiết kiệm chi phí
             urls = urls[: self.posts_limit]
 
             if urls:
-                scraped = await self.scrape_posts(urls)
+                scraped = self._filter_search_items(await self.scrape_posts(urls))
                 if scraped:
                     all_posts.extend(scraped)
                     continue
@@ -183,16 +247,10 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
-        text = (
-            post.get("text")
-            or post.get("postText")
-            or post.get("message")
-            or post.get("content")
-            or post.get("body")
-            or ""
-        ).strip()
-        if text:
-            return text
+        for key in ("text", "postText", "message", "message_rich", "content", "body"):
+            text = coerce_text(post.get(key))
+            if text:
+                return text
         return FacebookCrawler._attachment_caption(post)
 
     @staticmethod
@@ -211,13 +269,12 @@ class FacebookCrawler(BaseCrawler):
                 if isinstance(c, str):
                     txt = c.strip()
                 elif isinstance(c, dict):
-                    txt = (
+                    txt = coerce_text(
                         c.get("text")
                         or c.get("message")
                         or c.get("body")
                         or c.get("comment_text")
-                        or ""
-                    ).strip()
+                    )
                 else:
                     txt = ""
                 if txt:
@@ -236,7 +293,14 @@ class FacebookCrawler(BaseCrawler):
         reactions = post.get("reactions")
         if isinstance(reactions, dict) and reactions.get("like") is not None:
             return int(reactions["like"])
-        for key in ("reactionsCount", "likes", "likeCount", "reactionLikeCount", "likesCount"):
+        for key in (
+            "reactions_count",
+            "reactionsCount",
+            "likes",
+            "likeCount",
+            "reactionLikeCount",
+            "likesCount",
+        ):
             val = post.get(key)
             if val is not None:
                 return int(val)
@@ -247,7 +311,7 @@ class FacebookCrawler(BaseCrawler):
         comments = post.get("comments")
         if isinstance(comments, int):
             return comments
-        for key in ("commentsCount", "commentCount", "directReplyCount"):
+        for key in ("comments_count", "commentsCount", "commentCount", "directReplyCount"):
             val = post.get(key)
             if val is not None:
                 return int(val)
@@ -255,11 +319,22 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_share_count(post: dict[str, Any]) -> int:
-        for key in ("sharesCount", "shareCount", "shares", "repostCount"):
+        for key in ("reshare_count", "sharesCount", "shareCount", "shares", "repostCount"):
             val = post.get(key)
             if val is not None:
                 return int(val)
         return 0
+
+    @staticmethod
+    def _extract_post_date(post: dict[str, Any]) -> str:
+        for key in ("time", "date", "takenAtFormatted"):
+            val = post.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        ts = post.get("timestamp")
+        if isinstance(ts, (int, float)) and ts > 0:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        return ""
 
     def _format_output(self, posts: list[dict[str, Any]], limit: int | None = None) -> str:
         if not posts:
@@ -286,7 +361,7 @@ class FacebookCrawler(BaseCrawler):
                 "username": author,
                 "isVerified": post.get("isVerified") or post.get("verified") or False,
                 "captionText": text,
-                "takenAtFormatted": str(post.get("time") or post.get("date") or post.get("timestamp") or ""),
+                "takenAtFormatted": self._extract_post_date(post),
                 "likeCount": self._extract_like_count(post),
                 "directReplyCount": self._extract_reply_count(post),
                 "repostCount": self._extract_share_count(post),
