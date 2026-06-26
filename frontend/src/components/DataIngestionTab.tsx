@@ -293,7 +293,7 @@ export default function DataIngestionTab({
           className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest transition-all cursor-pointer shadow-xs shrink-0"
         >
           <span className="material-symbols-outlined text-[16px]">tune</span>
-          Configure Generation Rules
+          Configure Rules
         </button>
       </div>
 

@@ -312,7 +312,6 @@ export default function App() {
           trigger: updatedPersona.trigger,
           utterance: updatedPersona.utterance,
           frequency: updatedPersona.frequency,
-          frequencyText: updatedPersona.frequencyText,
           pain: updatedPersona.pain,
           reject: updatedPersona.reject,
           expectedAIBehavior: updatedPersona.expectedAIBehavior,
