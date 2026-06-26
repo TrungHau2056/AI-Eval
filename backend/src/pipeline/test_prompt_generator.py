@@ -1,188 +1,79 @@
 import json
 import logging
-from typing import Any, TypedDict, Literal
-
-from langgraph.graph import END, START, StateGraph
+from typing import Any
 
 from src.llm.base import LLMClient
 from src.memory.base import BaseMemory
 from src.memory.conversation_memory import ConversationMemory
 from src.models.schemas import Intent, Persona, TestCasePrompt
 from src.observability.langfuse import capture_io_enabled, langfuse_observation
+from src.prompts.loader import TESTCASE_SYSTEM, TESTCASE_USER
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """# ROLE
-Bạn là một Senior QA Automation Engineer chuyên kiểm thử hệ thống AI. Nhiệm vụ của bạn là nhận thông tin về một Persona và một Intent cụ thể, từ đó thiết kế đúng 1 Kịch bản kiểm thử (Test Case) sắc bén, bám sát 100% cấu trúc cơ sở dữ liệu kiểm thử của dự án.
-
-# QUY TẮC BẮT BUỘC (TEST CASE DESIGN RULES)
-
-1. SỐ LƯỢNG ĐẦU RA CỐ ĐỊNH: Mỗi lần gọi API này BẮT BUỘC trả về đúng 1 Test Case trong mảng `test_cases`. Không được sinh 0 hoặc nhiều hơn 1 Test Case trên mỗi lần gọi.
-
-2. MÔ PHỎNG "START" (User Utterance):
-   - Trường `start` chính là câu chat giả lập của người dùng để nạp vào chatbot. BẮT BUỘC kế thừa giọng điệu từ Persona.
-   - Phải giữ đúng "VN Reality" (viết thường, viết tắt, từ đệm, lỗi chính tả cố ý nếu Persona là nhóm khó tính/vội vã).
-   - Ví dụ ĐÚNG (Happy-path): "cho mình hỏi trạm sạc ở quận 7 còn chỗ k ạ"
-   - Ví dụ ĐÚNG (Edge-case): "sac o dau day troi oi pin sap het roi"
-
-3. ĐỊNH NGHĨA "END EXPECTED OUTCOME" (Tiêu chí nghiệm thu):
-   - Trường `end_expected_outcome` phải là một đoạn văn bản chỉ dẫn rõ ràng cho Tester, bao gồm 2 vế logic:
-     + [MUST HAVE]: Hành động AI bắt buộc phải làm. Phải cụ thể, đếm được.
-     + [MUST NOT HAVE / BOUNDARY]: Bẫy giới hạn bám sát đặc điểm Persona.
-   - Ví dụ SAI: "AI phải trả lời hữu ích và thân thiện."
-   - Ví dụ ĐÚNG: "[MUST HAVE] AI phản hồi trong vòng 1 lượt, trả về 2-3 trạm sạc còn trống gần nhất kèm khoảng cách ước tính. [MUST NOT HAVE] AI không gợi ý trạm cách >2km; không dùng từ ngữ kỹ thuật như 'DC fast charging port'."
-
-4. BỐI CẢNH & TÂM LÝ:
-   - Tóm tắt tâm lý người dùng vào trường `title_user_moment` (Ai? Đang bị gì? Muốn gì?).
-   - Viết rõ mục tiêu vào trường `goal` để Tester hiểu kỳ vọng cuối cùng của người dùng.
-
-Trả về JSON theo đúng schema yêu cầu, không thêm text nào khác."""
-
-USER_PROMPT = """Thiết kế 1 Test Case cho cặp Persona-Intent sau:
-
-**Intent:**
-- Intent Num: {intent_num}
-- Intent Name: {intent_name}
-
-**Persona Details:**
-{persona_json}
-
-{guidance}{memory_context}
-
-Trả về JSON dạng:
-{{
-  "test_cases": [
-    {{
-      "intent_num": {intent_num},
-      "intent_name": "{intent_name}",
-      "case_num": {persona_num},
-      "title_user_moment": "Tóm tắt ngắn gọn hoàn cảnh (Ai? Đang bị gì? Muốn gì?)",
-      "persona": "Mô tả chi tiết user kế thừa từ input Persona",
-      "goal": "Mục tiêu cụ thể của người dùng",
-      "start": "Câu chat giả lập của người dùng nạp vào chatbot",
-      "end_expected_outcome": "Mô tả chi tiết [MUST HAVE] và [MUST NOT HAVE] theo đúng Persona"
-    }}
-  ]
-}}"""
-
-
-class TestCaseState(TypedDict):
-    personas: list[Persona]
-    intents: list[Intent]
-    guidance: str
-    current_persona_idx: int
-    all_test_cases: list[dict[str, Any]]
 
 
 class TestCaseAgent:
     def __init__(self, llm: LLMClient, memory: BaseMemory | None = None):
         self.llm = llm
         self.memory = memory or ConversationMemory()
-        self.graph = self._build_graph()
 
-    def _build_graph(self):
-        workflow = StateGraph(TestCaseState)
-        workflow.add_node("prepare", self._prepare_node)
-        workflow.add_node("generate_test_case", self._generate_test_case_node)
-
-        workflow.add_edge(START, "prepare")
-        workflow.add_edge("prepare", "generate_test_case")
-        workflow.add_conditional_edges(
-            "generate_test_case",
-            self._route_next_persona,
-            ["generate_test_case", END]
+    async def run(
+        self,
+        personas: list[Persona],
+        intents: list[Intent],
+        guidance: str = "",
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        logger.info(
+            "TestCaseAgent.run() | num_personas=%d | num_intents=%d | guidance=%s",
+            len(personas),
+            len(intents),
+            bool(guidance),
         )
-        return workflow.compile()
+        if guidance:
+            self.memory.add("user", guidance)
 
-    def _prepare_node(self, state: TestCaseState) -> dict[str, Any]:
-        logger.info("TestCaseGraph | prepare | total_personas=%d", len(state["personas"]))
-        return {
-            "current_persona_idx": 0,
-            "all_test_cases": []
-        }
-
-    async def _generate_test_case_node(self, state: TestCaseState) -> dict[str, Any]:
-        idx = state["current_persona_idx"]
-        personas = state["personas"]
-        intents = state["intents"]
-        guidance = state["guidance"]
-
-        persona = personas[idx]
-        intent_map = {i.id: i for i in intents}
-        intent = intent_map.get(persona.intent_id)
-
-        updated_test_cases = list(state.get("all_test_cases", []))
-
-        if not intent:
-            logger.warning("TestCaseGraph | skipping persona %s: no matching intent found (intent_id=%s)", persona.id, persona.intent_id)
-            return {
-                "current_persona_idx": idx + 1
-            }
-
-        logger.info("TestCaseGraph | generate_test_case | persona %d/%d (type=%s) | intent=%s", idx + 1, len(personas), persona.persona_type, persona.intent_name)
-        prompt = self._build_prompt(persona, intent, guidance)
+        prompt = self._build_prompt(personas, intents, guidance)
 
         with langfuse_observation(
-            "test-case-generator",
+            "test-case-generation",
             as_type="generation",
             model=str(getattr(self.llm, "model", self.llm.__class__.__name__)),
-            input=prompt if capture_io_enabled() else {"persona_num": persona.persona_num, "intent_name": persona.intent_name},
-            metadata={"persona_num": persona.persona_num, "intent_id": persona.intent_id},
+            input=prompt if capture_io_enabled() else {
+                "persona_count": len(personas),
+                "intent_count": len(intents),
+            },
+            metadata={
+                "stage": "test_case_generation",
+                "persona_count": len(personas),
+                "intent_count": len(intents),
+            },
+            trace_id=trace_id,
         ) as generation:
-            raw = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
-            test_cases = self._parse(raw, persona, intent)
-            logger.info("TestCaseGraph | generate_test_case | parsed %d test cases for persona %d", len(test_cases), idx + 1)
-            
+            raw = await self.llm.generate(prompt, system_prompt=TESTCASE_SYSTEM)
+            test_cases = self._parse(raw, personas, intents)
+            logger.info("TestCaseAgent.run() done | total=%d test cases", len(test_cases))
             generation.update(
                 output=raw if capture_io_enabled() else {"test_case_count": len(test_cases)}
             )
 
         self.memory.add("assistant", [tc.get("start", "") for tc in test_cases])
-        updated_test_cases.extend(test_cases)
+        return test_cases
 
-        return {
-            "all_test_cases": updated_test_cases,
-            "current_persona_idx": idx + 1
-        }
-
-    def _route_next_persona(self, state: TestCaseState) -> Literal["generate_test_case", END]:
-        if state["current_persona_idx"] < len(state["personas"]):
-            return "generate_test_case"
-        return END
-
-    async def run(self, personas: list[Persona], intents: list[Intent], guidance: str = "") -> list[dict[str, Any]]:
-        logger.info("TestCaseAgent.run() via LangGraph | num_personas=%d | num_intents=%d | guidance=%s", len(personas), len(intents), bool(guidance))
-        if guidance:
-            self.memory.add("user", guidance)
-
-        with langfuse_observation(
-            "test-case-generation",
-            as_type="span",
-            input={
-                "persona_count": len(personas),
-                "intent_count": len(intents),
-                "guidance_provided": bool(guidance),
-            },
-            metadata={"stage": "test_case_generation", "architecture": "langgraph"},
-        ) as span:
-            initial_state: TestCaseState = {
-                "personas": personas,
-                "intents": intents,
-                "guidance": guidance,
-                "current_persona_idx": 0,
-                "all_test_cases": []
-            }
-            final_state = await self.graph.ainvoke(initial_state)
-            result = final_state.get("all_test_cases", [])
-            span.update(
-                output={"test_case_count": len(result)}
-            )
-            logger.info("TestCaseAgent.run() via LangGraph done | total=%d test cases", len(result))
-            return result
-
-    async def run_single(self, persona: Persona, intent: Intent, guidance: str = "") -> list[dict[str, Any]]:
-        logger.info("TestCaseAgent.run_single() via LangGraph | persona=%s | intent=%s | guidance=%s", persona.persona_type, intent.intent_name, bool(guidance))
-        return await self.run([persona], [intent], guidance)
+    async def run_single(
+        self,
+        persona: Persona,
+        intent: Intent,
+        guidance: str = "",
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        logger.info(
+            "TestCaseAgent.run_single() | persona=%s | intent=%s | guidance=%s",
+            persona.persona_type,
+            intent.intent_name,
+            bool(guidance),
+        )
+        return await self.run([persona], [intent], guidance, trace_id=trace_id)
 
     def add_feedback(self, feedback: str) -> None:
         self.memory.add("feedback", feedback)
@@ -190,34 +81,57 @@ class TestCaseAgent:
     def clear_memory(self) -> None:
         self.memory.clear()
 
-    def _build_prompt(self, persona: Persona, intent: Intent, guidance: str) -> str:
+    def _build_prompt(
+        self, personas: list[Persona], intents: list[Intent], guidance: str
+    ) -> str:
         memory_context = ""
         ctx = self.memory.get_context()
         if ctx:
             memory_context = f"\n\n**Lich su / Goi y tu truoc:**\n{ctx}"
 
-        persona_json = json.dumps({
-            "persona_num": persona.persona_num,
-            "persona_type": persona.persona_type,
-            "trigger": persona.trigger,
-            "utterance": persona.utterance,
-            "frequency": persona.frequency,
-            "pain": persona.pain,
-            "reject": persona.reject,
-            "expected_behavior": persona.expected_behavior,
-            "ai_response_example": persona.ai_response_example,
-        }, ensure_ascii=False, indent=2)
+        intents_json = json.dumps(
+            [
+                {
+                    "intent_num": i.intent_num,
+                    "intent_name": i.intent_name,
+                }
+                for i in intents
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
 
-        return USER_PROMPT.format(
-            intent_num=intent.intent_num or 1,
-            intent_name=intent.intent_name or intent.goal,
-            persona_num=persona.persona_num or 1,
-            persona_json=persona_json,
+        personas_json = json.dumps(
+            [
+                {
+                    "persona_num": p.persona_num,
+                    "intent_num": p.intent_num,
+                    "intent_name": p.intent_name,
+                    "persona_type": p.persona_type,
+                    "trigger": p.trigger,
+                    "utterance": p.utterance,
+                    "frequency": p.frequency,
+                    "pain": p.pain,
+                    "reject": p.reject,
+                    "expected_behavior": p.expected_behavior,
+                    "ai_response_example": p.ai_response_example,
+                }
+                for p in personas
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        return TESTCASE_USER.format(
+            intents_json=intents_json,
+            personas_json=personas_json,
             guidance=f"Huong dan them: {guidance}" if guidance else "",
             memory_context=memory_context,
         )
 
-    def _parse(self, raw: str, persona: Persona, intent: Intent) -> list[dict[str, Any]]:
+    def _parse(
+        self, raw: str, personas: list[Persona], intents: list[Intent]
+    ) -> list[dict[str, Any]]:
         text = raw.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -229,23 +143,50 @@ class TestCaseAgent:
             return []
 
         items = data.get("test_cases", [])
+        persona_map = {(p.intent_num, p.persona_num): p for p in personas}
+        intent_map = {i.id: i for i in intents}
+        intent_name_map = {i.intent_name: i for i in intents}
+
         results: list[dict[str, Any]] = []
         for item in items:
-            start = item.get("start", "")
-            end_expected = item.get("end_expected_outcome", "")
+            start = item.get("start") or ""
             if not start:
                 continue
-            results.append(TestCasePrompt(
-                persona_id=persona.id,
-                intent_id=intent.id,
-                intent_num=item.get("intent_num", intent.intent_num),
-                intent_name=item.get("intent_name", intent.intent_name),
-                case_num=item.get("case_num", persona.persona_num),
-                title_user_moment=item.get("title_user_moment", ""),
-                persona=item.get("persona", persona.description),
-                goal=item.get("goal", ""),
-                start=start,
-                end_expected_outcome=end_expected,
-                prompt_text=start,
-            ).model_dump())
+
+            inum = item.get("intent_num")
+            pnum = item.get("persona_num")
+            persona = persona_map.get((inum, pnum))
+            if not persona:
+                intent_name = item.get("intent_name", "")
+                matching = [p for p in personas if p.intent_name == intent_name]
+                if matching:
+                    persona = matching[0]
+            if not persona:
+                logger.warning(
+                    "Could not match test case to persona | intent_num=%s persona_num=%s",
+                    inum,
+                    pnum,
+                )
+                continue
+
+            intent = intent_map.get(persona.intent_id) or intent_name_map.get(persona.intent_name)
+            if not intent:
+                logger.warning("Could not match test case to intent | persona_id=%s", persona.id)
+                continue
+
+            results.append(
+                TestCasePrompt(
+                    persona_id=persona.id,
+                    intent_id=intent.id,
+                    intent_num=item.get("intent_num", intent.intent_num),
+                    intent_name=item.get("intent_name") or intent.intent_name,
+                    case_num=item.get("case_num", persona.persona_num),
+                    title_user_moment=item.get("title_user_moment") or "",
+                    persona=item.get("persona") or persona.description,
+                    goal=item.get("goal") or "",
+                    start=start,
+                    end_expected_outcome=item.get("end_expected_outcome") or "",
+                    prompt_text=start,
+                ).model_dump()
+            )
         return results

@@ -1,0 +1,7 @@
+Phân tích dữ liệu phản hồi thô sau và trích xuất các Intent độc lập, đặc trưng nhất:
+
+---
+{raw_text}
+---
+
+{guidance}{memory_context}

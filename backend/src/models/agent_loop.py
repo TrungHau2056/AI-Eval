@@ -48,14 +48,14 @@ class PersonaAgentLoop:
     Agent loop sinh và cải thiện persona theo rubric.
 
     Usage:
-        loop = PersonaAgentLoop(llm=client, max_iterations=3)
+        loop = PersonaAgentLoop(llm=client, max_iterations=5)
         result = await loop.run(intent, rubric)
     """
 
     def __init__(
         self,
         llm: PersonaAgentLLMBase,
-        max_iterations: int = 3,
+        max_iterations: int = 5,
         on_progress: Callable[[str], None] | None = None,
     ):
         self.llm = llm

@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class NoopObservation:
+    id: str = ""
+    trace_id: str = ""
+
     def update(self, **_: Any) -> None:
         return None
 
@@ -37,6 +40,8 @@ def langfuse_observation(
     input: Any = None,
     metadata: dict[str, Any] | None = None,
     model: str | None = None,
+    trace_id: str | None = None,
+    parent_span_id: str | None = None,
 ) -> Iterator[Any]:
     if not langfuse_enabled():
         yield NoopObservation()
@@ -57,6 +62,13 @@ def langfuse_observation(
             kwargs["metadata"] = metadata
         if model:
             kwargs["model"] = model
+        trace_context: dict[str, Any] = {}
+        if trace_id:
+            trace_context["trace_id"] = trace_id
+        if parent_span_id:
+            trace_context["parent_span_id"] = parent_span_id
+        if trace_context:
+            kwargs["trace_context"] = trace_context
 
         observation = langfuse.start_as_current_observation(**kwargs)
     except Exception:
