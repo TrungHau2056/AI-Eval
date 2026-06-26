@@ -90,9 +90,13 @@ class TiktokCrawler(BaseCrawler):
 
     async def run(self, keywords: list[str]) -> str:
         all_posts: list[dict[str, Any]] = []
-        for keyword in keywords:
+        for raw_keyword in keywords:
+            # Normalize: bỏ #, thay _ bằng space
+            keyword = raw_keyword.lstrip("#").replace("_", " ").strip()
+            if not keyword:
+                continue
             logger.info("=" * 60)
-            logger.info("Processing TikTok keyword: '%s'", keyword)
+            logger.info("Processing TikTok keyword: '%s' (raw: '%s')", keyword, raw_keyword)
 
             search_results = self._flatten_items(await self.search_posts(keyword))
             if not search_results:
@@ -106,14 +110,17 @@ class TiktokCrawler(BaseCrawler):
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
         p = TiktokCrawler._normalize_post(post)
-        return (
+        raw = (
             p.get("text")
             or p.get("desc")
             or p.get("description")
             or p.get("title")
             or p.get("caption")
             or ""
-        ).strip()
+        )
+        if isinstance(raw, dict):
+            raw = raw.get("text") or raw.get("value") or ""
+        return str(raw).strip()
 
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:
@@ -183,7 +190,10 @@ class TiktokCrawler(BaseCrawler):
                     if isinstance(c, str) and c.strip():
                         comments.append(c.strip())
                     elif isinstance(c, dict):
-                        txt = (c.get("text") or c.get("content") or "").strip()
+                        raw = c.get("text") or c.get("content") or ""
+                        if isinstance(raw, dict):
+                            raw = raw.get("text") or raw.get("value") or ""
+                        txt = str(raw).strip()
                         if txt:
                             comments.append(txt)
 

@@ -12,13 +12,15 @@ Luồng:
 from __future__ import annotations
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from src.crawlers.facebook_crawler import FacebookCrawler
 from src.crawlers.threads_crawler import ThreadsCrawler
 from src.crawlers.tiktok_crawler import TiktokCrawler
-from src.config import settings
+from src.config import settings, BACKEND_DIR
 from src.api.deps import get_state
 from src.api.routers.frontend_api import (
     _map_pipeline_intents_to_fe,
@@ -31,6 +33,54 @@ from src.pipeline.intent_extractor import IntentAgent
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/crawl", tags=["crawl"])
+
+# ---------------------------------------------------------------------------
+# Crawl history persistence — file JSON tích lũy dữ liệu (KHÔNG xóa log cũ).
+# Mỗi lần crawl (facebook/threads/tiktok) sẽ append 1 "run" mới lên ĐẦU file,
+# tương tự cách sheet ở FE cộng dồn kết quả lên đầu — vì mỗi lần crawl có thể
+# ra kết quả khác nhau và ta muốn giữ lại toàn bộ lịch sử.
+# ---------------------------------------------------------------------------
+CRAWL_HISTORY_PATH = os.path.join(BACKEND_DIR, "data", "crawl_history.json")
+
+
+def _load_crawl_history() -> list[dict]:
+    """Dọc toàn bộ lịch sử crawl đã lưu trên đĩa. Không tồn tại/lỗi → trả về []."""
+    try:
+        if os.path.exists(CRAWL_HISTORY_PATH):
+            with open(CRAWL_HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Không đọc được crawl_history.json: %s", exc)
+    return []
+
+
+def _append_crawl_history(
+    platform: str, domain: str, keywords: list[str], posts: list[dict]
+) -> int:
+    """Append kết quả crawl mới nhất lên ĐẦU lịch sử và lưu lại ra file JSON.
+
+    Không xóa các run đã lưu trước đó — chỉ cộng dồn thêm. Trả về tổng số
+    posts đã tích lũy qua tất cả các lần crawl, để show trong crawl_logs.
+    """
+    history = _load_crawl_history()
+    run_entry = {
+        "crawled_at": datetime.now(timezone.utc).isoformat(),
+        "platform": platform,
+        "domain": domain,
+        "keywords": keywords,
+        "post_count": len(posts),
+        "posts": posts,
+    }
+    history = [run_entry] + history  # run mới nhất luôn ở đầu, log cũ giữ nguyên phía dưới
+    try:
+        os.makedirs(os.path.dirname(CRAWL_HISTORY_PATH), exist_ok=True)
+        with open(CRAWL_HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except OSError as exc:
+        logger.warning("Không lưu được crawl_history.json: %s", exc)
+    return sum(len(run.get("posts", [])) for run in history)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +276,8 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
     get_state().raw_social_content = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
+    # Lưu lịch sử crawl ra file JSON — append lên đầu, KHÔNG xóa các lần crawl trước.
+    total_saved = _append_crawl_history(req.platform, req.domain, req.keywords, crawl_posts)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
             raw_content, req.domain, req.platform, req.keywords
@@ -235,6 +287,9 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             f"Platform: {req.platform}",
             f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
         ]
+    crawl_logs.append(
+        f"Saved to data/crawl_history.json — accumulated total: {total_saved} posts across all runs (old logs kept)."
+    )
     # ---- Response ----
     return FacebookCrawlResponse(
         success=True,
@@ -282,6 +337,8 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
     get_state().raw_social_content = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
+    # Lưu lịch sử crawl ra file JSON — append lên đầu, KHÔNG xóa các lần crawl trước.
+    total_saved = _append_crawl_history(req.platform, req.domain, req.keywords, crawl_posts)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
             raw_content, req.domain, req.platform, req.keywords
@@ -291,6 +348,9 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             f"Platform: {req.platform}",
             f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
         ]
+    crawl_logs.append(
+        f"Saved to data/crawl_history.json — accumulated total: {total_saved} posts across all runs (old logs kept)."
+    )
     # ---- Response ----
     return ThreadsCrawlResponse(
         success=True,
@@ -339,6 +399,8 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
     get_state().raw_social_content = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
+    # Lưu lịch sử crawl ra file JSON — append lên đầu, KHÔNG xóa các lần crawl trước.
+    total_saved = _append_crawl_history(req.platform, req.domain, req.keywords, crawl_posts)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
             raw_content, req.domain, req.platform, req.keywords, source_type="tiktok"
@@ -348,6 +410,9 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             f"Platform: {req.platform}",
             f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
         ]
+    crawl_logs.append(
+        f"Saved to data/crawl_history.json — accumulated total: {total_saved} posts across all runs (old logs kept)."
+    )
     return TiktokCrawlResponse(
         success=True,
         platform=req.platform,

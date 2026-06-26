@@ -135,9 +135,13 @@ class ThreadsCrawler(BaseCrawler):
             keywords → autocomplete → search → scrape → formatted string
         """
         all_posts: list[dict[str, Any]] = []
-        for keyword in keywords:
+        for raw_keyword in keywords:
+            # Normalize: bỏ #, thay _ bằng space
+            keyword = raw_keyword.lstrip("#").replace("_", " ").strip()
+            if not keyword:
+                continue
             logger.info("=" * 60)
-            logger.info("Processing Threads keyword: '%s'", keyword)
+            logger.info("Processing Threads keyword: '%s' (raw: '%s')", keyword, raw_keyword)
             
             # ---- Step 1: Mở rộng keyword ----
             # ĐÃ TẮT: Tạm thời tắt Autocomplete để tiết kiệm tối đa chi phí $5 Apify
@@ -187,7 +191,7 @@ class ThreadsCrawler(BaseCrawler):
     def _extract_text(post: dict[str, Any]) -> str:
         """Trích text chính từ Threads post."""
         p = post.get("thread") or post
-        return (
+        raw = (
             p.get("text")
             or p.get("caption")
             or p.get("captionText")
@@ -195,7 +199,10 @@ class ThreadsCrawler(BaseCrawler):
             or p.get("content")
             or p.get("body")
             or ""
-        ).strip()
+        )
+        if isinstance(raw, dict):
+            raw = raw.get("text") or raw.get("value") or ""
+        return str(raw).strip()
 
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:
@@ -224,13 +231,16 @@ class ThreadsCrawler(BaseCrawler):
                 if isinstance(c, str):
                     txt = c.strip()
                 elif isinstance(c, dict):
-                    txt = (
+                    raw = (
                         c.get("text")
                         or c.get("message")
                         or c.get("body")
                         or c.get("caption")
                         or ""
-                    ).strip()
+                    )
+                    if isinstance(raw, dict):
+                        raw = raw.get("text") or raw.get("value") or ""
+                    txt = str(raw).strip()
                 else:
                     txt = ""
                 if txt:

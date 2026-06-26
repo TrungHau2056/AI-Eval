@@ -149,9 +149,13 @@ class FacebookCrawler(BaseCrawler):
         Autocomplete skipped by default to save Apify cost.
         """
         all_posts: list[dict[str, Any]] = []
-        for keyword in keywords:
+        for raw_keyword in keywords:
+            # Normalize: bỏ #, thay _ bằng space → Facebook search hiểu được
+            keyword = raw_keyword.lstrip("#").replace("_", " ").strip()
+            if not keyword:
+                continue
             logger.info("=" * 60)
-            logger.info("Processing keyword: '%s'", keyword)
+            logger.info("Processing keyword: '%s' (raw: '%s')", keyword, raw_keyword)
             queries = [keyword]
 
             search_results: list[dict[str, Any]] = []
@@ -180,14 +184,17 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
-        text = (
+        raw = (
             post.get("text")
             or post.get("postText")
             or post.get("message")
             or post.get("content")
             or post.get("body")
             or ""
-        ).strip()
+        )
+        if isinstance(raw, dict):
+            raw = raw.get("text") or raw.get("value") or ""
+        text = str(raw).strip()
         if text:
             return text
         return FacebookCrawler._attachment_caption(post)
@@ -208,13 +215,16 @@ class FacebookCrawler(BaseCrawler):
                 if isinstance(c, str):
                     txt = c.strip()
                 elif isinstance(c, dict):
-                    txt = (
+                    raw = (
                         c.get("text")
                         or c.get("message")
                         or c.get("body")
                         or c.get("comment_text")
                         or ""
-                    ).strip()
+                    )
+                    if isinstance(raw, dict):
+                        raw = raw.get("text") or raw.get("value") or ""
+                    txt = str(raw).strip()
                 else:
                     txt = ""
                 if txt:

@@ -28,24 +28,53 @@ const SOURCE_OPTIONS = ["survey", "social", "text"];
 const PLATFORMS = ["Facebook", "Threads", "TikTok"];
 
 // Pre-defined domains and their initial hashtags (kept in Vietnamese — used as real crawl keywords).
+// Mỗi domain đi kèm 1 list "common keyword" hay được nhắc tới trên social Việt Nam,
+// dùng làm gợi ý mặc định để crawl (người dùng vẫn có thể thêm/xóa tự do).
 const PRESET_DOMAINS = [
   {
     id: "du-lich",
     label: "Du lịch",
     icon: "explore",
-    tags: ["#hủy_vé", "#khách_sạn", "#vũng_tàu", "#đà_lạt", "#tour_giá_rẻ", "#hành_lý"]
+    tags: [
+      "#hủy_vé", "#khách_sạn", "#vũng_tàu", "#đà_lạt", "#tour_giá_rẻ", "#hành_lý",
+      "#phú_quốc", "#nha_trang", "#sapa", "#hạ_long", "#vé_máy_bay", "#đặt_phòng", "#visa"
+    ]
   },
   {
     id: "giai-tri",
     label: "Giải trí",
     icon: "theater_comedy",
-    tags: ["#concert", "#netflix", "#bản_quyền", "#vé_vip", "#livestream", "#phim_bom_tấn"]
+    tags: [
+      "#concert", "#netflix", "#bản_quyền", "#vé_vip", "#livestream", "#phim_bom_tấn",
+      "#phim_chiếu_rạp", "#gameshow", "#fan_meeting", "#idol_kpop", "#rạp_chiếu_phim"
+    ]
   },
   {
     id: "the-thao",
     label: "Thể thao",
     icon: "sports_soccer",
-    tags: ["#marathon", "#đăng_ký_bib", "#giải_chạy", "#gym_card", "#gián_đoạn", "#bóng_đá"]
+    tags: [
+      "#marathon", "#đăng_ký_bib", "#giải_chạy", "#gym_card", "#gián_đoạn", "#bóng_đá",
+      "#v-league", "#đội_tuyển_việt_nam", "#trực_tiếp_bóng_đá", "#vé_xem_trận", "#cầu_lông"
+    ]
+  },
+  {
+    id: "mua-sam",
+    label: "Mua sắm",
+    icon: "shopping_cart",
+    tags: [
+      "#shopee", "#lazada", "#tiktok_shop", "#flash_sale", "#freeship", "#mã_giảm_giá",
+      "#hàng_lỗi", "#đổi_trả", "#ship_chậm", "#hàng_giả", "#live_bán_hàng", "#voucher"
+    ]
+  },
+  {
+    id: "tin-tuc",
+    label: "Tin tức",
+    icon: "newspaper",
+    tags: [
+      "#tin_nóng", "#thời_sự", "#giá_xăng", "#dự_báo_bão", "#thời_tiết", "#giao_thông",
+      "#chính_sách_mới", "#tin_giả", "#an_ninh", "#báo_điện_tử"
+    ]
   },
   {
     id: "cong-nghe",
@@ -66,6 +95,10 @@ const PRESET_DOMAINS = [
     tags: ["#khóa_học", "#học_phí", "#chứng_chỉ", "#thi_thử", "#tài_liệu", "#đăng_ký"]
   }
 ];
+
+// localStorage key dùng để lưu lại sheet kết quả crawl (persist qua các lần reload trang).
+// Dữ liệu được lưu dưới dạng JSON string — đúng yêu cầu "lưu vào file Json" ở phía FE.
+const CRAWLED_POSTS_STORAGE_KEY = "ai_eval_crawled_posts_sheet_v1";
 
 export default function DataIngestionTab({
   onDiscover,
@@ -88,7 +121,19 @@ export default function DataIngestionTab({
   // ---- Social Trend Explorer ----
   const [socialLoading, setSocialLoading] = useState(false);
   const [socialResultsText, setSocialResultsText] = useState("");
-  const [crawledPosts, setCrawledPosts] = useState<any[]>([]);
+  const [crawledPosts, setCrawledPosts] = useState<any[]>(() => {
+    // Khôi phục sheet đã lưu từ lần trước (nếu có) — không mất dữ liệu khi reload trang.
+    try {
+      const saved = localStorage.getItem(CRAWLED_POSTS_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  // Đánh dấu: lần "Crawl Social Data" ĐẦU TIÊN trong session hiện tại của component này
+  // sẽ RESET sheet (trả về đúng kết quả crawl mới nhất). Từ lần thứ 2 trở đi trong cùng
+  // session, kết quả mới sẽ được CỘNG DỒN (prepend) lên đầu sheet, không xóa log cũ.
+  const hasCrawledOnceRef = useRef(false);
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["Facebook"]);
   const [selectedDomainId, setSelectedDomainId] = useState<string>("du-lich");
@@ -98,6 +143,15 @@ export default function DataIngestionTab({
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeywordInput, setNewKeywordInput] = useState("");
   const [isViral, setIsViral] = useState(false);
+
+  // Tự động lưu sheet (đã cộng dồn) vào localStorage mỗi khi crawledPosts thay đổi.
+  useEffect(() => {
+    try {
+      localStorage.setItem(CRAWLED_POSTS_STORAGE_KEY, JSON.stringify(crawledPosts));
+    } catch {
+      // Bỏ qua lỗi quota/private-mode — sheet vẫn hoạt động bình thường trong session.
+    }
+  }, [crawledPosts]);
 
   // Toggle a platform in the multi-select list.
   const handleTogglePlatform = (p: string) => {
@@ -235,7 +289,17 @@ export default function DataIngestionTab({
         });
       }
 
-      setCrawledPosts(postsToSave);
+      // Workflow sheet kết quả:
+      // - Lần "Crawl Social Data" ĐẦU TIÊN trong session này → reset sheet, chỉ hiện kết quả mới.
+      // - Các lần sau → KHÔNG xóa dữ liệu cũ, mà cộng dồn (prepend) kết quả mới lên đầu sheet,
+      //   vì mỗi lần crawl có thể trả về dữ liệu khác nhau.
+      setCrawledPosts((prev) => {
+        if (!hasCrawledOnceRef.current) {
+          hasCrawledOnceRef.current = true;
+          return postsToSave;
+        }
+        return [...postsToSave, ...prev];
+      });
       // Non-empty marker just to reveal the results banner.
       setSocialResultsText(`Crawled ${postsToSave.length} posts from ${finalPlatform}.`);
     } catch (e) {

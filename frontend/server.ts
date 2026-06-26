@@ -9,6 +9,7 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 // Capture raw body as Buffer for ALL content types (JSON, multipart, binary)
 // so the proxy can forward uploads (multipart/form-data) untouched.
@@ -19,44 +20,25 @@ app.all("/api/*", async (req, res) => {
   try {
     const targetUrl = `${BACKEND_URL}${req.originalUrl}`;
     const headers: Record<string, string> = {};
-    // Preserve original Content-Type (keeps multipart boundary intact).
     if (req.headers["content-type"]) headers["Content-Type"] = req.headers["content-type"] as string;
     if (req.headers.authorization) headers.Authorization = req.headers.authorization as string;
 
     const fetchOptions: RequestInit = { method: req.method, headers };
-
     const hasBody = req.method !== "GET" && req.method !== "HEAD" && Buffer.isBuffer(req.body) && req.body.length > 0;
-    if (hasBody) {
-      // Forward raw bytes as-is (works for JSON and multipart alike).
-      fetchOptions.body = req.body;
-    }
+    if (hasBody) fetchOptions.body = req.body;
 
-  const ai = getGeminiClient();
-  if (!ai) {
-    // Elegant fallback simulation compiling prompt into custom rule
-    const formattedPrompt = userPrompt.trim();
-    const mockCompiled = `Custom Rule V2: Optimized directive parameters focusing on ${formattedPrompt}. This overrides default classification priority, keeping standard categories. Extracted in real-time.`;
-    return res.json({ success: true, rule: mockCompiled, fallback: true });
-  }
-
-  try {
-    const prompt = `Convert the following user request or directive into an explicit, modular system directive that specifies how metadata and user intents should be extracted from customer logs.
-
-User adjustment request: "${userPrompt}"
-Current active rule: "${currentRule || "None (Default)"}"
-
-Generate a concise, highly professional 1-2 sentence instruction. Output ONLY the resulting instruction text. No quotes around it, no wrapper.`;
-    
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
+    const backendRes = await fetch(targetUrl, fetchOptions);
+    res.status(backendRes.status);
+    backendRes.headers.forEach((value, key) => {
+      if (!["content-encoding", "transfer-encoding", "connection"].includes(key)) {
+        res.setHeader(key, value);
+      }
     });
-    
-    const ruleResult = response.text?.trim() || currentRule;
-    res.json({ success: true, rule: ruleResult, fallback: false });
+    const buffer = await backendRes.arrayBuffer();
+    res.send(Buffer.from(buffer));
   } catch (err: any) {
-    console.error("Failed to compile user rule prompt with Gemini:", err);
-    res.status(500).json({ error: "Gemini failed to compile. Reverting." });
+    console.error("Proxy error:", err);
+    res.status(502).json({ error: "Backend proxy failed", detail: err.message });
   }
 });
 
