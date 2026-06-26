@@ -170,6 +170,61 @@ export default function App() {
     }
   };
 
+  // Step 1b: Discover Intents from Social Media via the real Apify crawl backend
+  // (Python /api/crawl/{platform}). Returns { intents, crawlLogs, crawlPosts } so the
+  // DataIngestionTab trace panel can render the crawl pipeline output.
+  const handleDiscoverSocial = async (
+    platform: string,
+    domain: string,
+    isViral: boolean,
+    keywords?: string[],
+    ruleText?: string,
+  ): Promise<{ intents: Intent[]; crawlLogs: string[]; crawlPosts: any[] }> => {
+    // Map UI platform label → crawl endpoint slug; default unknown "Other" → facebook.
+    const p = platform.toLowerCase();
+    let slug = "facebook";
+    if (p.includes("threads")) slug = "threads";
+    else if (p.includes("tiktok")) slug = "tiktok";
+    else if (p.includes("facebook")) slug = "facebook";
+
+    try {
+      const response = await fetch(`/api/crawl/${slug}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          domain,
+          keywords: keywords || [],
+          model: aiModel,
+          api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || result.error) {
+        throw new Error(result.detail || result.error || "Social crawl failed.");
+      }
+
+      const intents: Intent[] = result.intents || [];
+      // Crawl endpoints persist intents to pipeline state; sync local state from there.
+      const statsRes = await fetch("/api/state");
+      const freshState = await statsRes.json();
+      setIntents(freshState.intents || intents);
+
+      if (intents.length > 0) {
+        showToast(`Crawled ${platform} → extracted ${intents.length} intents!`, "success");
+      } else {
+        showToast(`Crawl finished for ${platform} but no intents were extracted.`, "info");
+      }
+
+      return { intents, crawlLogs: result.crawl_logs ?? [], crawlPosts: [] };
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || "Social Intent discovery failed.", "error");
+      return { intents: [], crawlLogs: [String(err.message || err)], crawlPosts: [] };
+    }
+  };
+
   // Step 2: Curation Matrix edits
   const handleUpdateIntent = (id: string, updated: Partial<Intent>) => {
     const updatedList = intents.map((item) => (item.id === id ? { ...item, ...updated } : item));
@@ -515,6 +570,8 @@ export default function App() {
               <DataIngestionTab
                 onDiscover={handleDiscover}
                 onIngest={handleIngest}
+                onDiscoverSocial={handleDiscoverSocial}
+                onProceedToCuration={() => setCurrentStep(2)}
                 ruleText={intentRule}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");

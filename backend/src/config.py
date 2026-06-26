@@ -1,5 +1,8 @@
+import os
 from pydantic_settings import BaseSettings
 
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(BACKEND_DIR, ".env")
 
 class Settings(BaseSettings):
     gemini_api_key: str = ""
@@ -20,7 +23,10 @@ class Settings(BaseSettings):
     match_high: float = 0.85  # sim >= high → auto match
     match_low: float = 0.55  # sim <= low → auto khác; ở giữa → LLM chấm
 
-    model_config = {"env_file": ".env", "env_prefix": ""}
+    # Apify (social-media crawl)
+    apify_token: str = ""
+
+    model_config = {"env_file": ENV_PATH, "env_prefix": ""}
 
 
 settings = Settings()

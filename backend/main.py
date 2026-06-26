@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routers.frontend_api import router as frontend_router
+from src.api.routers.crawl import router as crawl_router
 from src.observability.langfuse import flush_langfuse
 
 logging.basicConfig(
@@ -24,7 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(frontend_router)
-
+app.include_router(crawl_router)
 
 @app.get("/api/health")
 def health():

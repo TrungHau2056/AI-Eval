@@ -1,0 +1,112 @@
+[
+  {
+    "username": "Việt Không Gầy",
+    "isVerified": false,
+    "captionText": "Mọi người bàn tán khá nhiều về #VinFast #vf8 all new. Vậy suy nghĩ của bạn như thế nào?",
+    "takenAtFormatted": "2026-06-24T05:31:23.000Z",
+    "likeCount": 309,
+    "directReplyCount": 45,
+    "repostCount": 15,
+    "postUrl": "https://www.tiktok.com/@vietkhonggay/video/7654830322546183432",
+    "comments": []
+  },
+  {
+    "username": "KIẾN THỨC KINH TẾ",
+    "isVerified": true,
+    "captionText": "Xuất hiện tại các đại lý, VF 8 thế hệ mới khiến tín đồ xe điện “sốt xình xịch” xếp hàng trải nghiệm, bảo sao không đạt kỷ lục 12.728 đơn!\n#kienthuckinhte #kinhte #tiktoknews #news #VinFast #VF8",
+    "takenAtFormatted": "2026-06-25T01:58:21.000Z",
+    "likeCount": 210,
+    "directReplyCount": 12,
+    "repostCount": 4,
+    "postUrl": "https://www.tiktok.com/@kienthuckinhte28/video/7655146527425350932",
+    "comments": []
+  },
+  {
+    "username": "Muối Đất Mũi ⛵️",
+    "isVerified": false,
+    "captionText": "Từ từ đã, 26.06 này chúng ta có hẹn với Ngọc Anh và VF8 All New nè nhaaaa🩵 #muoidatmui #xh #ngocanhcamau #showroomvinfast #vf8allnew",
+    "takenAtFormatted": "2026-06-25T04:06:46.000Z",
+    "likeCount": 206,
+    "directReplyCount": 5,
+    "repostCount": 15,
+    "postUrl": "https://www.tiktok.com/@muoidatmui.camau/video/7655179633284893972",
+    "comments": []
+  },
+  {
+    "username": "Man TV",
+    "isVerified": true,
+    "captionText": "Đi xuyên nước Mỹ bằng Vinfast VF8 suốt 2 năm, chủ xe bất ngờ thay đổi hoàn toàn suy nghĩ ban đầu \n##mantv##news##vinfast##xedien##vf8",
+    "takenAtFormatted": "2026-06-19T13:25:39.000Z",
+    "likeCount": 1877,
+    "directReplyCount": 48,
+    "repostCount": 16,
+    "postUrl": "https://www.tiktok.com/@mantv.vn/video/7653097142139079943",
+    "comments": []
+  },
+  {
+    "username": "VinFast Lisle",
+    "isVerified": false,
+    "captionText": "Thinking about a VinFast VF 8? Before you make the switch, there are a few things you’ll want to know. From everyday practicality to EV ownership, we’re here to help you decide if it’s the right fit for your lifestyle.\n\nStop by VinFast Lisle and experience the VF 8 for yourself.\n\n#vinfastlisle #vinfast #ev #carfeatures #electricvehicle",
+    "takenAtFormatted": "2026-06-23T22:57:17.000Z",
+    "likeCount": 33,
+    "directReplyCount": 5,
+    "repostCount": 0,
+    "postUrl": "https://www.tiktok.com/@vinfastlisle/video/7654728641284246798",
+    "comments": []
+  },
+  {
+    "username": "Trai Trẻ Bán VinFast",
+    "isVerified": false,
+    "captionText": "VF 8 All New là màn lột xác đáng giá nhất của VinFast.\n\nKhông còn quá thiên về “thông số khủng”.\nThay vào đó là:\n— Êm hơn  \n— Mượt hơn  \n— Tiết kiệm hơn  \n— Dễ dùng mỗi ngày hơn\n\nĐây mới là chiếc SUV điện dành cho gia đình Việt.\n\nGiá từ 999 triệu đang khiến phân khúc SUV cực nóng.\n\n#VinFast #VF8 #VF8ThếHệMới #VinFastVF8 #VF8AllNew",
+    "takenAtFormatted": "2026-05-20T14:35:31.000Z",
+    "likeCount": 568,
+    "directReplyCount": 52,
+    "repostCount": 31,
+    "postUrl": "https://www.tiktok.com/@traitrebanvinfast/video/7641982589586263304",
+    "comments": []
+  },
+  {
+    "username": "LỐI SỐNG THƯỢNG LƯU",
+    "isVerified": false,
+    "captionText": "12.728 đơn đặt hàng chỉ trong 8 ngày đã là con số gây bất ngờ, nhưng sức hút của VF 8 thế hệ mới dường như vẫn chưa hạ nhiệt. Bạn đã xem xe thực tế chưa?\n\n#VF8 #VinFast #VF8TheHeMoi #XeDien #DSUV",
+    "takenAtFormatted": "2026-06-24T13:27:14.000Z",
+    "likeCount": 120,
+    "directReplyCount": 3,
+    "repostCount": 1,
+    "postUrl": "https://www.tiktok.com/@loisongthuongluu/video/7654952977161211156",
+    "comments": []
+  },
+  {
+    "username": "Ô tô Vinfast Thủ Dầu Một",
+    "isVerified": false,
+    "captionText": "Vinfast Vf8 quá đẹp anh em #viral #vf8 #vinfast",
+    "takenAtFormatted": "2026-06-18T09:36:02.000Z",
+    "likeCount": 4025,
+    "directReplyCount": 269,
+    "repostCount": 568,
+    "postUrl": "https://www.tiktok.com/@otovinfastthudaumot/video/7652666868309839125",
+    "comments": []
+  },
+  {
+    "username": "Quỳnh Ngó Xe",
+    "isVerified": false,
+    "captionText": "#creatorsearchinsights VinFast lại đánh up người dùng #xuhuongtiktok #trending #vinfast #vf8",
+    "takenAtFormatted": "2026-06-22T12:22:07.000Z",
+    "likeCount": 255,
+    "directReplyCount": 15,
+    "repostCount": 15,
+    "postUrl": "https://www.tiktok.com/@quynhngoxe/video/7654194013439937812",
+    "comments": []
+  },
+  {
+    "username": "Thái",
+    "isVerified": false,
+    "captionText": "Nói thế chứ Vf8 mới chạy nhẹ hơn,  lanh hơn nha,  iu iu \n#vf8allnew #thaivinfast",
+    "takenAtFormatted": "2026-06-21T07:11:59.000Z",
+    "likeCount": 202,
+    "directReplyCount": 36,
+    "repostCount": 14,
+    "postUrl": "https://www.tiktok.com/@thai._.tiktok/video/7653743017525775636",
+    "comments": []
+  }
+]
