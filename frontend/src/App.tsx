@@ -173,14 +173,14 @@ export default function App() {
   // Step 1b: Discover Intents from Social Media via the real Apify crawl backend
   // (Python /api/crawl/{platform}). Returns { intents, crawlLogs, crawlPosts } so the
   // DataIngestionTab trace panel can render the crawl pipeline output.
-  const handleDiscoverSocial = async (
+  const handleCrawlSocial = async (
     platform: string,
     domain: string,
-    isViral: boolean,
     keywords?: string[],
-    ruleText?: string,
-  ): Promise<{ intents: Intent[]; crawlLogs: string[]; crawlPosts: any[] }> => {
-    // Map UI platform label → crawl endpoint slug; default unknown "Other" → facebook.
+  ): Promise<{ crawlPosts: any[]; crawlLogs: string[] }> => {
+    // Crawl-only (extract_intents:false). Intents are produced later by Run Intent
+    // Discovery, which reads the crawled content the backend persists.
+    // Map UI platform label → crawl endpoint slug; default unknown → facebook.
     const p = platform.toLowerCase();
     let slug = "facebook";
     if (p.includes("threads")) slug = "threads";
@@ -195,6 +195,7 @@ export default function App() {
           platform,
           domain,
           keywords: keywords || [],
+          extract_intents: false,
           model: aiModel,
           api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,
         }),
@@ -205,23 +206,18 @@ export default function App() {
         throw new Error(result.detail || result.error || "Social crawl failed.");
       }
 
-      const intents: Intent[] = result.intents || [];
-      // Crawl endpoints persist intents to pipeline state; sync local state from there.
-      const statsRes = await fetch("/api/state");
-      const freshState = await statsRes.json();
-      setIntents(freshState.intents || intents);
-
-      if (intents.length > 0) {
-        showToast(`Crawled ${platform} → extracted ${intents.length} intents!`, "success");
+      const crawlPosts: any[] = result.crawl_posts || [];
+      if (crawlPosts.length > 0) {
+        showToast(`Crawled ${platform} → ${crawlPosts.length} posts collected!`, "success");
       } else {
-        showToast(`Crawl finished for ${platform} but no intents were extracted.`, "info");
+        showToast(`Crawl finished for ${platform} but no posts were returned.`, "info");
       }
 
-      return { intents, crawlLogs: result.crawl_logs ?? [], crawlPosts: [] };
+      return { crawlPosts, crawlLogs: result.crawl_logs ?? [] };
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Social Intent discovery failed.", "error");
-      return { intents: [], crawlLogs: [String(err.message || err)], crawlPosts: [] };
+      showToast(err.message || "Social crawl failed.", "error");
+      return { crawlPosts: [], crawlLogs: [String(err.message || err)] };
     }
   };
 
@@ -570,7 +566,7 @@ export default function App() {
               <DataIngestionTab
                 onDiscover={handleDiscover}
                 onIngest={handleIngest}
-                onDiscoverSocial={handleDiscoverSocial}
+                onCrawlSocial={handleCrawlSocial}
                 onProceedToCuration={() => setCurrentStep(2)}
                 ruleText={intentRule}
                 onOpenRuleModal={() => {

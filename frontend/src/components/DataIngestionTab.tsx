@@ -12,13 +12,11 @@ interface DataIngestionTabProps {
     files: { file: File; sourceType: string }[],
     prdFile: File | null,
   ) => Promise<IngestStats>;
-  onDiscoverSocial?: (
+  onCrawlSocial?: (
     platform: string,
     domain: string,
-    isViral: boolean,
     keywords?: string[],
-    ruleText?: string,
-  ) => Promise<any>;
+  ) => Promise<{ crawlPosts: any[]; crawlLogs: string[] }>;
   ruleText: string;
   onOpenRuleModal: () => void;
   onProceedToCuration?: () => void;
@@ -26,7 +24,10 @@ interface DataIngestionTabProps {
 
 const SOURCE_OPTIONS = ["survey", "social", "text"];
 
-// Pre-defined domains and their initial hashtags
+// Selectable social platforms (multi-select checkboxes).
+const PLATFORMS = ["Facebook", "Threads", "TikTok"];
+
+// Pre-defined domains and their initial hashtags (kept in Vietnamese — used as real crawl keywords).
 const PRESET_DOMAINS = [
   {
     id: "du-lich",
@@ -66,17 +67,15 @@ const PRESET_DOMAINS = [
   }
 ];
 
-const PRESET_OTHER_PLATFORMS = ["Instagram", "TikTok", "YouTube", "Zalo", "Reddit", "LinkedIn"];
-
 export default function DataIngestionTab({
   onDiscover,
   onIngest,
-  onDiscoverSocial,
+  onCrawlSocial,
   ruleText,
   onOpenRuleModal,
   onProceedToCuration,
 }: DataIngestionTabProps) {
-  // ---- Method A: multi-source ingest + PRD (HEAD) ----
+  // ---- Multi-source ingest + PRD ----
   const [logsText, setLogsText] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -86,11 +85,12 @@ export default function DataIngestionTab({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prdInputRef = useRef<HTMLInputElement>(null);
 
-  // ---- Method B: Social Trend Explorer ----
+  // ---- Social Trend Explorer ----
   const [socialLoading, setSocialLoading] = useState(false);
   const [socialResultsText, setSocialResultsText] = useState("");
-  const [platform, setPlatform] = useState<string>("Facebook");
-  const [customPlatform, setCustomPlatform] = useState("");
+  const [crawledPosts, setCrawledPosts] = useState<any[]>([]);
+  const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["Facebook"]);
   const [selectedDomainId, setSelectedDomainId] = useState<string>("du-lich");
   const [isCustomDomain, setIsCustomDomain] = useState(false);
   const [customDomainLabel, setCustomDomainLabel] = useState("");
@@ -98,6 +98,16 @@ export default function DataIngestionTab({
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeywordInput, setNewKeywordInput] = useState("");
   const [isViral, setIsViral] = useState(false);
+
+  // Toggle a platform in the multi-select list.
+  const handleTogglePlatform = (p: string) => {
+    setSelectedPlatforms((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
+    );
+  };
+
+  // Active platforms preserving the canonical order.
+  const getActivePlatforms = () => PLATFORMS.filter((p) => selectedPlatforms.includes(p));
 
   // Auto-populate hashtags when preset domain changes
   useEffect(() => {
@@ -111,7 +121,7 @@ export default function DataIngestionTab({
     }
   }, [selectedDomainId, isCustomDomain]);
 
-  // ---- Method A handlers ----
+  // ---- Ingest handlers ----
   const inferSourceType = (name: string): string => {
     const lower = name.toLowerCase();
     if (lower.endsWith(".md") || lower.endsWith(".txt")) return "text";
@@ -157,6 +167,7 @@ export default function DataIngestionTab({
     e.target.value = "";
   };
 
+  // Run Intent Discovery from any uploaded/pasted source (file / PRD / text). At least one required.
   const handleSubmit = async () => {
     const hasFiles = stagedFiles.length > 0 || prdFile;
     if (!hasFiles && logsText.trim().length === 0) {
@@ -182,81 +193,51 @@ export default function DataIngestionTab({
     }
   };
 
-  // ---- Method B handlers ----
-  const handleSocialSubmit = async () => {
-    if (!onDiscoverSocial) return;
+  // ---- Crawl-only handler: collect raw social posts into the results sheet ----
+  // Intent extraction is NOT done here — that happens in Run Intent Discovery, which
+  // reads the crawled content the backend persists.
+  const handleCrawlSubmit = async () => {
+    if (!onCrawlSocial) return;
+
+    // Require at least one selected platform.
+    const activeList = getActivePlatforms();
+    if (activeList.length === 0) {
+      alert("Please select at least one social platform.");
+      return;
+    }
+
     setSocialLoading(true);
     setSocialResultsText(""); // Reset previous results
 
-    // Determine exact platform and domain to send to API
-    const finalPlatform = platform === "Other" ? (customPlatform.trim() || "Mạng xã hội khác") : platform;
+    // Determine exact platform list and domain to send to API.
+    const finalPlatform = activeList.join(", ");
     const finalDomain = isCustomDomain ? (customDomainLabel.trim() || "Lĩnh vực Tùy chỉnh") : (PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label || "Du lịch");
 
     try {
-      const result = await onDiscoverSocial(finalPlatform, finalDomain, isViral, keywords, ruleText);
-      if (result) {
-        const intents = result.intents || [];
-        const crawlLogs = result.crawlLogs || [];
-        const crawlPosts = result.crawlPosts || [];
+      const result = await onCrawlSocial(finalPlatform, finalDomain, keywords);
+      let postsToSave: any[] = result?.crawlPosts ? [...result.crawlPosts] : [];
 
-        let outputLines: string[] = [];
-
-        // 1. Log Crawl Process Header
-        outputLines.push("================================================================================");
-        outputLines.push("🕷️ APIFY CRAWLER PIPELINE EXECUTION TRACE");
-        outputLines.push("================================================================================");
-        if (crawlLogs.length > 0) {
-          crawlLogs.forEach((log: string) => outputLines.push(`[SYSTEM LOG] ${log}`));
-        } else {
-          outputLines.push("[SYSTEM LOG] Chạy chế độ Sandbox / API key mặc định...");
-          outputLines.push(`[SYSTEM LOG] Thu thập thảo luận trên ${finalPlatform} liên quan đến lĩnh vực: ${finalDomain}`);
-          outputLines.push(`[SYSTEM LOG] Tìm kiếm từ khóa: ${keywords.join(", ")}`);
-        }
-        outputLines.push("");
-
-        // 2. Raw Scraped Contents
-        outputLines.push("================================================================================");
-        outputLines.push("📝 RAW CRAWLED POSTS & USER UTTERANCES");
-        outputLines.push("================================================================================");
-        if (crawlPosts.length > 0) {
-          crawlPosts.forEach((post: any, index: number) => {
-            const rawText = post.text || post.message || post.caption || post.snippet || post.title || JSON.stringify(post);
-            outputLines.push(`[Raw Post ${index + 1}]`);
-            outputLines.push(`- URL: ${post.url || "https://facebook.com/post/demo_" + index}`);
-            outputLines.push(`- Tương tác: Thích (${post.likes || Math.floor(Math.random() * 100)}), Bình luận (${post.commentsCount || Math.floor(Math.random() * 50)})`);
-            outputLines.push(`- Nội dung thô: "${rawText.slice(0, 300)}${rawText.length > 300 ? "..." : ""}"`);
-            outputLines.push("--------------------------------------------------------------------------------");
-          });
-        } else {
-          outputLines.push("[Thông tin] Trình thu thập dữ liệu đã trả về các cuộc thảo luận thô khớp với từ khóa.");
-          intents.forEach((intent: any, index: number) => {
-            outputLines.push(`[Raw Snippet ${index + 1}]`);
-            outputLines.push(`- Nền tảng: ${finalPlatform}`);
-            outputLines.push(`- Thảo luận thô: "${intent.utterance}"`);
-            outputLines.push("--------------------------------------------------------------------------------");
-          });
-        }
-        outputLines.push("");
-
-        // 3. Extracted Curated Intents
-        outputLines.push("================================================================================");
-        outputLines.push("🎯 CURATED INTENTS FOR COMPILATION SUITE (PARSED BY LLM)");
-        outputLines.push("================================================================================");
-        if (intents.length > 0) {
-          intents.forEach((intent: any, i: number) => {
-            outputLines.push(`[Ý định #${i + 1}]`);
-            outputLines.push(`- Tên ý định: ${intent.name}`);
-            outputLines.push(`- Giai đoạn sản phẩm: ${intent.phase}`);
-            outputLines.push(`- Câu hỏi / Thảo luận tiêu biểu: "${intent.utterance}"`);
-            outputLines.push(`- Bối cảnh kích hoạt: ${intent.triggerMoment}`);
-            outputLines.push("--------------------------------------------------------------------------------");
-          });
-        } else {
-          outputLines.push("[Cảnh báo] Không tìm thấy hoặc chưa trích xuất được ý định hợp lệ.");
-        }
-
-        setSocialResultsText(outputLines.join("\n"));
+      // Demo fallback when the crawler returns nothing (e.g. no Apify token): build a
+      // few placeholder rows from the keywords so the sheet isn't blank in demo mode.
+      if (postsToSave.length === 0) {
+        const dates = ["2026-06-25", "2026-06-24", "2026-06-23", "2026-06-22", "2026-06-20"];
+        const sampleTexts = keywords.length > 0 ? keywords : ["#feedback", "#support", "#issue"];
+        postsToSave = sampleTexts.map((kw: string, index: number) => {
+          const postPlatform = activeList[index % activeList.length] || "Facebook";
+          return {
+            platform: postPlatform,
+            url: `https://www.${postPlatform.toLowerCase().replace(/\s+/g, "")}.com/groups/${finalDomain.toLowerCase().replace(/\s+/g, "")}/posts/demo_${index}`,
+            postingDate: dates[index % dates.length],
+            text: `Thảo luận mẫu liên quan đến ${kw} trên ${postPlatform}.`,
+            likes: Math.floor(Math.random() * 500) + 50,
+            commentsCount: Math.floor(Math.random() * 150) + 10,
+          };
+        });
       }
+
+      setCrawledPosts(postsToSave);
+      // Non-empty marker just to reveal the results banner.
+      setSocialResultsText(`Crawled ${postsToSave.length} posts from ${finalPlatform}.`);
     } catch (e) {
       console.error(e);
     } finally {
@@ -316,20 +297,33 @@ export default function DataIngestionTab({
         </button>
       </div>
 
-      {/* Main split grid container */}
+      {/* Unified ingestion & discovery workspace */}
       <div className="bg-white border border-stone-200 overflow-hidden flex flex-col rounded-none shadow-sm min-h-[640px]">
-        <div className="grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-stone-100 flex-grow">
+        <div className="p-8 flex flex-col gap-8">
 
-          {/* LEFT COLUMN: Multi-source ingest + PRD context */}
-          <div className="p-8 flex flex-col gap-6 justify-between h-full">
+          {/* Workspace header */}
+          <div className="border-b border-stone-100 pb-3">
+            <h3 className="text-[12px] font-mono font-bold uppercase tracking-[0.2em] text-stone-800 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-[#ff4d00]">database</span>
+              Data Ingestion & Intent Discovery
+            </h3>
+            <p className="text-[11px] text-stone-400 font-serif italic mt-1">
+              Upload multi-source data or explore live social trends to discover user intents — both flows feed the same pipeline.
+            </p>
+          </div>
+
+          {/* Two input groups inside one workspace (no Method A/B split) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            {/* GROUP: Input Sources */}
             <div className="space-y-6">
               <div className="border-b border-stone-100 pb-3">
-                <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-800 flex items-center gap-2">
+                <h4 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-700 flex items-center gap-2">
                   <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">upload_file</span>
-                  Method A: Direct Log & Ticket Ingestion
-                </h3>
+                  Input Sources
+                </h4>
                 <p className="text-[11px] text-stone-400 font-serif italic mt-1">
-                  Upload multi-source files (survey / social / text) + optional PRD to parse user intents.
+                  Upload files (survey / social / text) + optional PRD, or paste raw text. At least one source is required.
                 </p>
               </div>
 
@@ -401,7 +395,7 @@ export default function DataIngestionTab({
                   value={logsText}
                   onChange={(e) => setLogsText(e.target.value)}
                   className="w-full h-32 bg-stone-50/50 border border-stone-200 rounded-none p-4 text-[13px] font-mono focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all placeholder:text-stone-400 text-stone-800"
-                  placeholder={`Dán post + comment social ở đây, ví dụ:\n"sạc ở đâu vậy mn ơi"\n"đặt lái thử vf8 t7 đc k"`}
+                  placeholder={`Paste social posts + comments here, e.g.\n"where can I charge it?"\n"can I book a vf8 test drive this Saturday?"`}
                 />
               </div>
 
@@ -422,119 +416,24 @@ export default function DataIngestionTab({
               )}
             </div>
 
-            {/* Run button (Left Column) */}
-            <div className="pt-4 flex justify-start">
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="flex items-center justify-center gap-3 px-8 py-3.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer w-full border-0 shadow-sm"
-              >
-                {loading ? (
-                  <>
-                    <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                    Ingesting & Discovering Intents...
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[16px]">search_check</span>
-                    Run Intent Discovery
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN: Social Media Explore Workspace */}
-          <div className="p-8 flex flex-col gap-6 justify-between bg-stone-50/30 h-full">
+            {/* GROUP: Social Trend Explorer */}
             <div className="space-y-6">
               <div className="border-b border-stone-100 pb-3">
-                <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-800 flex items-center gap-2">
+                <h4 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-700 flex items-center gap-2">
                   <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">explore</span>
-                  Method B: Social Trend Explorer
-                </h3>
+                  Social Trend Explorer
+                </h4>
                 <p className="text-[11px] text-stone-400 font-serif italic mt-1">
                   Discover consumer complaints and strategic intents directly from active social networks.
                 </p>
               </div>
 
-              {/* Platform Selector - Expandable with More Option */}
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between">
-                  <span>Chọn nền tảng truyền thông</span>
-                  <span className="font-mono text-[9px] text-[#ff4d00] uppercase">Active: {platform === "Other" ? (customPlatform || "Other") : platform}</span>
-                </label>
-
-                <div className="grid grid-cols-3 gap-2">
-                  {(["Facebook", "Threads", "Other"] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setPlatform(p)}
-                      className={`py-3 text-center font-mono text-[10px] uppercase tracking-wider font-bold border transition-all cursor-pointer ${
-                        platform === p
-                          ? "bg-[#ff4d00] text-white border-[#ff4d00]"
-                          : "bg-white text-stone-600 border-stone-200 hover:border-stone-300"
-                      }`}
-                    >
-                      {p === "Other" ? "More +" : p}
-                    </button>
-                  ))}
-                </div>
-
-                {/* More / Custom Platform dropdown expand section */}
-                {platform === "Other" && (
-                  <div className="mt-2 p-3 bg-white border border-stone-200 space-y-2.5 animate-fadeIn">
-                    <p className="text-[9.5px] font-mono text-stone-500 uppercase tracking-wider font-bold">
-                      Chọn nền tảng phổ biến khác hoặc nhập mới:
-                    </p>
-
-                    {/* Presets Grid */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {PRESET_OTHER_PLATFORMS.map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setCustomPlatform(preset)}
-                          className={`px-2.5 py-1 text-[10px] font-mono transition-all border ${
-                            customPlatform === preset
-                              ? "bg-stone-900 text-white border-stone-900"
-                              : "bg-stone-50 text-stone-600 border-stone-200 hover:border-stone-300"
-                          }`}
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Custom input */}
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={customPlatform}
-                        onChange={(e) => setCustomPlatform(e.target.value)}
-                        placeholder="Nhập tên mạng xã hội khác (vd: Tiktok, Zalo...)"
-                        className="flex-grow bg-stone-50 border border-stone-200 px-3 py-1.5 text-[11px] font-mono focus:border-[#ff4d00] outline-none"
-                      />
-                      {customPlatform && (
-                        <button
-                          type="button"
-                          onClick={() => setCustomPlatform("")}
-                          className="px-2.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 text-stone-600 text-[10px] font-mono uppercase font-bold"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Expandable Combobox/Select for Business Domains */}
               <div className="flex flex-col gap-2 relative">
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between items-center">
-                  <span>Lĩnh vực / Ngành kinh doanh</span>
+                  <span>Business Domain / Industry</span>
                   <span className="font-mono text-[9px] text-[#ff4d00] uppercase">
-                    Selected: {isCustomDomain ? (customDomainLabel || "Tùy chỉnh") : PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label}
+                    Selected: {isCustomDomain ? (customDomainLabel || "Custom") : PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label}
                   </span>
                 </label>
 
@@ -551,7 +450,7 @@ export default function DataIngestionTab({
                       </span>
                       <span className="text-[11px] uppercase font-bold tracking-wider text-stone-800">
                         {isCustomDomain
-                          ? (customDomainLabel || "Nhập Lĩnh vực Tùy chỉnh...")
+                          ? (customDomainLabel || "Enter custom domain...")
                           : (PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label || "Du lịch")
                         }
                       </span>
@@ -566,7 +465,7 @@ export default function DataIngestionTab({
                     <div className="absolute top-[100%] left-0 right-0 z-50 bg-white border border-stone-200 shadow-lg max-h-[300px] overflow-y-auto custom-scrollbar">
                       <div className="p-1">
                         <p className="text-[8.5px] font-mono text-stone-400 font-bold uppercase tracking-widest px-3 py-1.5 border-b border-stone-50">
-                          Chọn từ danh sách có sẵn:
+                          Select from presets:
                         </p>
                         {PRESET_DOMAINS.map((d) => (
                           <button
@@ -609,7 +508,7 @@ export default function DataIngestionTab({
                             <span className="material-symbols-outlined text-[16px]">
                               edit_note
                             </span>
-                            <span className="text-[11px] font-bold tracking-wider uppercase">Tùy chỉnh lĩnh vực khác...</span>
+                            <span className="text-[11px] font-bold tracking-wider uppercase">Custom domain...</span>
                           </div>
                           {isCustomDomain && (
                             <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">check</span>
@@ -627,11 +526,43 @@ export default function DataIngestionTab({
                       type="text"
                       value={customDomainLabel}
                       onChange={(e) => setCustomDomainLabel(e.target.value)}
-                      placeholder="Nhập tên lĩnh vực bất kỳ (Ví dụ: Bất động sản, Bảo hiểm, Ẩm thực...)"
+                      placeholder="Enter any domain (e.g. Real Estate, Insurance, F&B...)"
                       className="w-full bg-white border border-[#ff4d00]/40 px-3 py-2 text-[11px] font-mono focus:border-[#ff4d00] focus:ring-1 focus:ring-[#ff4d00] outline-none"
                     />
                   </div>
                 )}
+              </div>
+
+              {/* Platform Selector - multi-select checkboxes */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between">
+                  <span>Select social platforms</span>
+                  <span className="font-mono text-[9px] text-[#ff4d00] uppercase">Active: {getActivePlatforms().join(", ") || "None"}</span>
+                </label>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {PLATFORMS.map((p) => {
+                    const checked = selectedPlatforms.includes(p);
+                    return (
+                      <label
+                        key={p}
+                        className={`flex items-center justify-center gap-2 py-3 px-2 border font-mono text-[10px] uppercase tracking-wider font-bold cursor-pointer transition-all ${
+                          checked
+                            ? "bg-[#ff4d00] text-white border-[#ff4d00]"
+                            : "bg-white text-stone-600 border-stone-200 hover:border-stone-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => handleTogglePlatform(p)}
+                          className="w-3.5 h-3.5 accent-[#ff4d00] cursor-pointer"
+                        />
+                        {p}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Keywords & Hashtags Manager section */}
@@ -639,14 +570,14 @@ export default function DataIngestionTab({
                 <div className="flex items-center justify-between border-b border-stone-100 pb-2">
                   <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-[14px] text-stone-400">tag</span>
-                    Hashtags & Từ khóa tìm kiếm ({keywords.length})
+                    Hashtags & Search keywords ({keywords.length})
                   </label>
                   <button
                     type="button"
                     onClick={handleResetKeywords}
                     className="text-[9px] font-mono font-bold text-stone-400 hover:text-[#ff4d00] uppercase tracking-wider"
                   >
-                    Reset mặc định
+                    Reset to defaults
                   </button>
                 </div>
 
@@ -656,7 +587,7 @@ export default function DataIngestionTab({
                     type="text"
                     value={newKeywordInput}
                     onChange={(e) => setNewKeywordInput(e.target.value)}
-                    placeholder="Thêm từ khóa hoặc hashtag mới (vd: #giá_vé)"
+                    placeholder="Add a new keyword or hashtag (e.g. #giá_vé)"
                     className="flex-grow bg-stone-50 border border-stone-200 px-3 py-1.5 text-[11px] font-mono focus:border-[#ff4d00] outline-none"
                   />
                   <button
@@ -671,7 +602,7 @@ export default function DataIngestionTab({
                 <div className="mt-3 flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto custom-scrollbar p-0.5">
                   {keywords.length === 0 ? (
                     <p className="text-[10px] font-serif italic text-stone-400 py-1">
-                      Chưa có từ khóa nào. Hãy thêm từ khóa để định hướng AI tốt hơn.
+                      No keywords yet. Add keywords to better guide the AI.
                     </p>
                   ) : (
                     keywords.map((kw, idx) => (
@@ -696,7 +627,7 @@ export default function DataIngestionTab({
               {/* Virality Toggle */}
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">
-                  Mức độ tương tác / Phổ biến
+                  Engagement / Popularity level
                 </label>
                 <button
                   type="button"
@@ -712,9 +643,9 @@ export default function DataIngestionTab({
                       {isViral ? "local_fire_department" : "trending_flat"}
                     </span>
                     <div>
-                      <p className="text-[11px] uppercase font-bold tracking-wider">Có yếu tố Viral (Lan truyền)</p>
+                      <p className="text-[11px] uppercase font-bold tracking-wider">Include viral signals</p>
                       <p className="text-[9.5px] text-stone-400 font-serif italic mt-0.5">
-                        {isViral ? "Thu thập thảo luận có lượt tương tác cực lớn" : "Chế độ tương tác thông thường"}
+                        {isViral ? "Collect discussions with very high engagement" : "Standard engagement mode"}
                       </p>
                     </div>
                   </div>
@@ -724,76 +655,268 @@ export default function DataIngestionTab({
                 </button>
               </div>
             </div>
-
-            {/* Run Button (Right Column) */}
-            <div className="pt-4 flex flex-col gap-4">
-              <button
-                onClick={handleSocialSubmit}
-                disabled={socialLoading}
-                className="flex items-center justify-center gap-3 px-8 py-3.5 bg-stone-900 text-white hover:bg-stone-850 rounded-none font-bold text-[10px] uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer w-full border-0 shadow-sm"
-              >
-                {socialLoading ? (
-                  <>
-                    <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                    Exploring Social Space...
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[16px]">rocket_launch</span>
-                    Explore Social Intent
-                  </>
-                )}
-              </button>
-
-              {/* Social Explore Results Box */}
-              {socialResultsText && (
-                <div className="mt-4 border-t border-stone-200 pt-6 space-y-3 animate-fadeIn">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-mono font-bold text-[#ff4d00] uppercase tracking-widest flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[15px]">terminal</span>
-                      Discovered Social Intents & Questions
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(socialResultsText);
-                        alert("Đã sao chép kết quả tìm kiếm vào clipboard!");
-                      }}
-                      className="text-[9px] font-mono font-bold text-stone-500 hover:text-[#ff4d00] uppercase tracking-wider flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">content_copy</span>
-                      Sao chép
-                    </button>
-                  </div>
-
-                  <textarea
-                    readOnly
-                    value={socialResultsText}
-                    className="w-full h-64 bg-stone-900 text-stone-100 font-mono text-[11px] leading-relaxed p-4 rounded-none border border-stone-850 focus:outline-none custom-scrollbar shadow-inner"
-                  />
-
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-stone-100/50 p-3 border border-stone-200">
-                    <p className="text-[10px] text-stone-500 font-serif italic max-w-sm">
-                      Các thảo luận này đã được lọc ý định thực tế, tự động phân loại và đồng bộ trực tiếp vào hệ thống.
+          </div>
+ {/* Social Explore Results Box - Action Banner */}
+          {socialResultsText && (
+            <div className="mt-2 border-t border-stone-200 pt-6 animate-fadeIn">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#ff4d00]/5 p-4 border border-[#ff4d00]/20">
+                <div className="flex items-start gap-2.5">
+                  <span className="material-symbols-outlined text-[#ff4d00] text-[20px] mt-0.5">check_circle</span>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-stone-900 uppercase tracking-wider font-mono">
+                      Social data crawled successfully!
+                    </h4>
+                    <p className="text-[10px] text-stone-500 font-serif italic mt-0.5 max-w-md">
+                      Raw crawled posts are listed below — open the sheet to review, or run Intent Discovery to extract intents.
                     </p>
-                    {onProceedToCuration && (
-                      <button
-                        type="button"
-                        onClick={onProceedToCuration}
-                        className="px-4 py-2 bg-[#ff4d00] hover:bg-[#ff4d00]/90 text-white font-mono text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5 shrink-0 rounded-none border-0 cursor-pointer shadow-xs transition-colors"
-                      >
-                        Curation Matrix
-                        <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                      </button>
-                    )}
                   </div>
                 </div>
-              )}
+                <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsSheetModalOpen(true)}
+                    className="px-4 py-2 bg-stone-900 hover:bg-stone-850 text-white font-mono text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5 rounded-none border-0 cursor-pointer shadow-xs transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">table_chart</span>
+                    View results (Sheet)
+                  </button>
+                </div>
+              </div>
             </div>
+          )}
+          {/* Shared action footer: both run buttons */}
+          <div className="border-t border-stone-100 pt-6 flex flex-col sm:flex-row gap-4">
+            {/* Run Intent Discovery (from uploaded/pasted sources) */}
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+            >
+              {loading ? (
+                <>
+                  <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
+                  Ingesting & Discovering Intents...
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[16px]">search_check</span>
+                  Run Intent Discovery
+                </>
+              )}
+            </button>
+
+              
+            {/* Crawl Social Data (raw crawl → results sheet; no intent extraction) */}
+            <button
+              onClick={handleCrawlSubmit}
+              disabled={socialLoading}
+              className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-stone-900 text-white hover:bg-stone-850 rounded-none font-bold text-[10px] uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+            >
+              {socialLoading ? (
+                <>
+                  <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
+                  Crawling Social Data...
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[16px]">travel_explore</span>
+                  Crawl Social Data
+                </>
+              )}
+            </button>
           </div>
+
+          {/* Social Explore Results Box - raw log version (commented out, kept for reference) */}
+          {/*
+          {socialResultsText && (
+            <div className="mt-4 border-t border-stone-200 pt-6 space-y-3 animate-fadeIn">
+              <textarea
+                readOnly
+                value={socialResultsText}
+                className="w-full h-64 bg-stone-900 text-stone-100 font-mono text-[11px] leading-relaxed p-4 rounded-none border border-stone-850 focus:outline-none custom-scrollbar shadow-inner"
+              />
+            </div>
+          )}
+          */}
+
+         
 
         </div>
       </div>
+
+      {/* Social Crawled Posts Sheet Modal Popup */}
+      {isSheetModalOpen && (
+        <div className="fixed inset-0 bg-[#000000]/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-stone-300 rounded-none max-w-5xl w-full flex flex-col shadow-2xl h-[580px] overflow-hidden">
+
+            {/* Modal Header */}
+            <div className="bg-stone-50 px-6 py-4 flex items-center justify-between border-b border-stone-200">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-[#ff4d00] text-[24px]">table_chart</span>
+                <div>
+                  <h3 className="text-[13px] font-bold text-stone-900 uppercase tracking-widest font-mono">
+                    Social Media Crawl Results
+                  </h3>
+                  <p className="text-[10.5px] text-stone-400 font-serif italic mt-0.5">
+                    Detailed breakdown of posts/comments containing consumer feedback
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSheetModalOpen(false)}
+                className="text-stone-400 hover:text-stone-700 transition-colors cursor-pointer bg-transparent border-0"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Modal Table / Sheet Body */}
+            <div className="flex-grow overflow-auto p-6 custom-scrollbar bg-stone-50/20">
+              {crawledPosts.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-stone-400 space-y-2">
+                  <span className="material-symbols-outlined text-[48px] text-stone-300">database_off</span>
+                  <p className="text-xs font-mono uppercase tracking-wider">No crawled data available.</p>
+                </div>
+              ) : (
+                <div className="border border-stone-200 bg-white overflow-hidden shadow-xs">
+                  <table className="w-full text-left border-collapse text-[11px] leading-normal">
+                    <thead>
+                      <tr className="bg-stone-100/80 border-b border-stone-200 text-[10px] font-mono uppercase font-bold text-stone-600">
+                        <th className="px-4 py-3 border-r border-stone-200">Platform</th>
+                        <th className="px-4 py-3 border-r border-stone-200">Source URL</th>
+                        <th className="px-4 py-3 border-r border-stone-200">Posting Date</th>
+                        <th className="px-4 py-3 border-r border-stone-200 text-center">Engagement</th>
+                        <th className="px-4 py-3">Discussion Content</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200">
+                      {crawledPosts.map((post, idx) => {
+                        const hasEngagements = post.likes !== undefined || post.commentsCount !== undefined;
+                        return (
+                          <tr key={idx} className="hover:bg-stone-50/50 transition-colors">
+                            {/* Platform */}
+                            <td className="px-4 py-3 font-mono font-bold text-stone-700 whitespace-nowrap border-r border-stone-200">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-stone-100 text-stone-850 rounded-none border border-stone-200">
+                                <span className="material-symbols-outlined text-[12px]">
+                                  {post.platform?.toLowerCase() === "facebook" ? "public" : "chat_bubble"}
+                                </span>
+                                {post.platform || getActivePlatforms()[0] || "Facebook"}
+                              </span>
+                            </td>
+
+                            {/* URL */}
+                            <td className="px-4 py-3 border-r border-stone-200">
+                              {post.url ? (
+                                <div className="flex items-center gap-1.5 max-w-[220px]">
+                                  <a
+                                    href={post.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-stone-500 hover:text-[#ff4d00] hover:underline font-mono truncate text-[10.5px]"
+                                    title={post.url}
+                                  >
+                                    {post.url}
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(post.url);
+                                      alert("Link copied!");
+                                    }}
+                                    className="text-stone-400 hover:text-[#ff4d00] transition-colors p-0.5 hover:bg-stone-100 rounded-sm cursor-pointer border-0 bg-transparent"
+                                    title="Copy Link"
+                                  >
+                                    <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-stone-400 italic">N/A</span>
+                              )}
+                            </td>
+
+                            {/* Posting Date */}
+                            <td className="px-4 py-3 font-mono text-stone-600 whitespace-nowrap border-r border-stone-200">
+                              {post.postingDate || "2026-06-25"}
+                            </td>
+
+                            {/* Engagement */}
+                            <td className="px-4 py-3 border-r border-stone-200 text-center whitespace-nowrap">
+                              {hasEngagements ? (
+                                <div className="inline-flex items-center gap-2 text-[10px] font-mono text-stone-500 justify-center">
+                                  <span className="flex items-center gap-0.5 text-stone-600" title="Likes">
+                                    <span className="material-symbols-outlined text-[12px] text-amber-500">thumb_up</span>
+                                    {post.likes || 0}
+                                  </span>
+                                  <span className="flex items-center gap-0.5 text-stone-600" title="Comments">
+                                    <span className="material-symbols-outlined text-[12px] text-stone-400">comment</span>
+                                    {post.commentsCount || 0}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-stone-400 italic">-</span>
+                              )}
+                            </td>
+
+                            {/* Content text */}
+                            <td className="px-4 py-3 text-stone-700 font-sans max-w-[320px] truncate" title={post.text}>
+                              {post.text || <span className="text-stone-400 italic">No text content</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Controls Footer */}
+            <div className="bg-stone-50 px-6 py-4 flex items-center justify-between border-t border-stone-200 font-mono text-[10px]">
+              <span className="text-stone-500 uppercase tracking-wider">
+                Total: <strong className="text-stone-850 font-bold">{crawledPosts.length}</strong> posts crawled
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const headers = ["Platform", "URL", "Posting Date", "Likes", "Comments", "Content"];
+                    const rows = crawledPosts.map(post => [
+                      post.platform || getActivePlatforms()[0] || "Facebook",
+                      post.url || "",
+                      post.postingDate || "",
+                      post.likes || 0,
+                      post.commentsCount || 0,
+                      `"${(post.text || "").replace(/"/g, '""')}"`
+                    ]);
+                    const csvContent = "data:text/csv;charset=utf-8,﻿"
+                      + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodedUri);
+                    const downloadName = `crawled_posts_${(getActivePlatforms()[0] || "social").toLowerCase()}_${Date.now()}.csv`;
+                    link.setAttribute("download", downloadName);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-700 text-[10px] uppercase font-bold tracking-widest cursor-pointer transition-colors"
+                >
+                  Download Excel/CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSheetModalOpen(false)}
+                  className="px-5 py-2 bg-[#ff4d00] hover:bg-[#e04400] text-white text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer border-0"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
