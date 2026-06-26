@@ -1,8 +1,11 @@
 import os
 from pydantic_settings import BaseSettings
 
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENV_PATH = os.path.join(BACKEND_DIR, ".env")
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../backend
+ROOT_DIR = os.path.dirname(BACKEND_DIR)                                     # repo root
+# Root .env is the documented location (README: `cp .env.example .env`);
+# backend/.env (if present) overrides it. Missing files are ignored.
+ENV_FILES = (os.path.join(ROOT_DIR, ".env"), os.path.join(BACKEND_DIR, ".env"))
 
 class Settings(BaseSettings):
     gemini_api_key: str = ""
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     # Apify (social-media crawl)
     apify_token: str = ""
 
-    model_config = {"env_file": ENV_PATH, "env_prefix": ""}
+    model_config = {"env_file": ENV_FILES, "env_prefix": ""}
 
 
 settings = Settings()

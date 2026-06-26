@@ -39,18 +39,20 @@ class BaseCrawler(ABC):
             2. GET   /v2/actor-runs/{run_id}?waitForFinish  → đợi xong
             3. GET   /v2/datasets/{dataset_id}/items    → lấy kết quả
         """
-        headers = {"Content-Type": "application/json"}
-        params_auth = {"token": self.token}
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        # Authenticate via Authorization header (NOT a ?token= query param) so the
+        # Apify token never appears in httpx's INFO request-URL logs.
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}",
+        }
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as client:
             # ---- 1. Start the actor run ----
             safe_actor_id = actor_id.replace("/", "~")
             start_url = f"{self.base_url}/v2/acts/{safe_actor_id}/runs"
             logger.info("Starting actor %s …", actor_id)
             resp = await client.post(
                 start_url,
-                params=params_auth,
                 json=run_input,
-                headers=headers,
             )
             resp.raise_for_status()
             run_data: dict = resp.json().get("data", {})
@@ -65,7 +67,7 @@ class BaseCrawler(ABC):
             status = "UNKNOWN"
             while True:
                 # Mỗi lần wait tối đa 60s do giới hạn của Apify API
-                wait_params = {**params_auth, "waitForFinish": "60"}
+                wait_params = {"waitForFinish": "60"}
                 resp = await client.get(wait_url, params=wait_params)
                 resp.raise_for_status()
                 status = resp.json().get("data", {}).get("status", "UNKNOWN")
@@ -82,7 +84,7 @@ class BaseCrawler(ABC):
                 return []
             # ---- 3. Fetch dataset items ----
             items_url = f"{self.base_url}/v2/datasets/{dataset_id}/items"
-            resp = await client.get(items_url, params=params_auth)
+            resp = await client.get(items_url)
             resp.raise_for_status()
             items: list[dict] = resp.json()
             logger.info("Actor %s returned %d items.", actor_id, len(items))
