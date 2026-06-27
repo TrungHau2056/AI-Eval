@@ -9,7 +9,7 @@ Output là 1 string formatted sẵn sàng cho IntentAgent.
 from __future__ import annotations
 import logging
 from typing import Any
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import BaseCrawler, coerce_text
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +85,7 @@ class ThreadsCrawler(BaseCrawler):
         query: str,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Tìm kiếm các bài viết Threads bằng query.
-        """
+        """Search Threads posts via igview-owner/threads-search-scraper."""
         limit = limit or self.search_limit
         run_input: dict[str, Any] = {
             "searchQuery": query,
@@ -98,8 +96,27 @@ class ThreadsCrawler(BaseCrawler):
         except Exception as exc:
             logger.error("Threads Search failed for '%s': %s", query, exc)
             return []
-        logger.info("Threads Search '%s' → %d results.", query, len(items))
-        return items
+        filtered = self._filter_search_items(items)
+        logger.info("Threads Search '%s' → %d results.", query, len(filtered))
+        return filtered
+
+    @staticmethod
+    def _filter_search_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        valid: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("error"):
+                continue
+            p = item.get("thread") or item
+            url = (
+                p.get("url")
+                or p.get("postUrl")
+                or p.get("link")
+                or p.get("permalink")
+                or ""
+            )
+            if url:
+                valid.append(item)
+        return valid
 
     # ==================================================================
     # Step 3 — Threads Deep Scrape (scrape by URLs)
@@ -153,30 +170,32 @@ class ThreadsCrawler(BaseCrawler):
                 logger.warning("No Threads search results for keyword '%s' — skipping.", keyword)
                 continue
 
-            # ---- Thu thập URLs từ search results ----
+            posts_with_text = [item for item in search_results if self._extract_text(item)]
+            if posts_with_text:
+                all_posts.extend(posts_with_text)
+                continue
+
             urls: list[str] = []
             for item in search_results:
+                p = item.get("thread") or item
                 url = (
-                    item.get("url")
-                    or item.get("postUrl")
-                    or item.get("link")
-                    or item.get("permalink")
+                    p.get("url")
+                    or p.get("postUrl")
+                    or p.get("link")
+                    or p.get("permalink")
                     or ""
                 )
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
-            # Giới hạn số URL deep-scrape đúng bằng posts_limit để tiết kiệm chi phí
             urls = urls[: self.posts_limit]
 
-            # ---- Step 3: Deep scrape posts ----
             if urls:
-                scraped = await self.scrape_posts(urls)
+                scraped = self._filter_search_items(await self.scrape_posts(urls))
                 if scraped:
                     all_posts.extend(scraped)
                     continue
 
-            # ---- Fallback: dùng search results nếu scrape trống ----
             logger.info("Falling back to Threads search results for keyword '%s'.", keyword)
             all_posts.extend(search_results)
 
@@ -190,15 +209,11 @@ class ThreadsCrawler(BaseCrawler):
     def _extract_text(post: dict[str, Any]) -> str:
         """Trích text chính từ Threads post."""
         p = post.get("thread") or post
-        return (
-            p.get("text")
-            or p.get("caption")
-            or p.get("captionText")
-            or p.get("message")
-            or p.get("content")
-            or p.get("body")
-            or ""
-        ).strip()
+        for key in ("text", "caption", "captionText", "message", "content", "body"):
+            text = coerce_text(p.get(key))
+            if text:
+                return text
+        return ""
 
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:
@@ -227,13 +242,12 @@ class ThreadsCrawler(BaseCrawler):
                 if isinstance(c, str):
                     txt = c.strip()
                 elif isinstance(c, dict):
-                    txt = (
+                    txt = coerce_text(
                         c.get("text")
                         or c.get("message")
                         or c.get("body")
                         or c.get("caption")
-                        or ""
-                    ).strip()
+                    )
                 else:
                     txt = ""
                 if txt:

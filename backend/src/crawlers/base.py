@@ -10,6 +10,30 @@ from abc import ABC, abstractmethod
 from typing import Any
 import httpx
 logger = logging.getLogger(__name__)
+
+
+def coerce_text(value: Any) -> str:
+    """Normalize Apify field values to a plain string (some actors nest text in dicts)."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value).strip()
+    if isinstance(value, dict):
+        for key in ("text", "message", "body", "content", "value", "caption", "description"):
+            nested = value.get(key)
+            if nested:
+                coerced = coerce_text(nested)
+                if coerced:
+                    return coerced
+        return ""
+    if isinstance(value, list):
+        parts = [coerce_text(item) for item in value]
+        return " ".join(part for part in parts if part)
+    return str(value).strip()
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

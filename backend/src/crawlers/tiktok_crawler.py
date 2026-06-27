@@ -1,23 +1,34 @@
 """
-TikTok Crawler — crawl TikTok via clockworks/tiktok-scraper.
+TikTok Crawler — crawl TikTok via multiple Apify actors with fallback chain:
+    1. clockworks/tiktok-scraper         (primary)
+    2. epctex/tiktok-search-scraper      (fallback #1)
+    3. automation-lab/tiktok-search-scraper (fallback #2)
+    4. paul_44/tiktok-search             (fallback #3 / legacy)
 Pipeline:
-    1. TikTok Search → tìm video TikTok theo keyword, trả về danh sách video có metadata
+    keywords → search (with fallback) → flatten → formatted JSON string
 Output là 1 chuỗi JSON formatted sẵn sàng cho IntentAgent.
 """
 from __future__ import annotations
 import logging
 import json
 from typing import Any
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import BaseCrawler, coerce_text
 
 logger = logging.getLogger(__name__)
 
-# clockworks uses platform credits; epctex returns {"demo": true} placeholders on free tier
+# Search actor chain (tried in order until one returns usable results):
+#   1. clockworks/tiktok-scraper (primary — uses platform credits)
+#   2. epctex/tiktok-search-scraper (fallback #1 — may return demo placeholders on free tier)
+#   3. automation-lab/tiktok-search-scraper (fallback #2)
+#   4. paul_44/tiktok-search (legacy fallback #3)
 SEARCH_ACTOR = "clockworks/tiktok-scraper"
+FALLBACK_SEARCH_ACTOR_1 = "epctex/tiktok-search-scraper"
+FALLBACK_SEARCH_ACTOR_2 = "automation-lab/tiktok-search-scraper"
+LEGACY_SEARCH_ACTOR = "paul_44/tiktok-search"
 
 
 class TiktokCrawler(BaseCrawler):
-    """Pipeline crawl TikTok: search."""
+    """Pipeline crawl TikTok: search (with 3-level fallback)."""
 
     def __init__(
         self,
@@ -27,19 +38,93 @@ class TiktokCrawler(BaseCrawler):
         super().__init__(apify_token)
         self.search_limit = search_limit
 
+    # ==================================================================
+    # Search methods — one per actor (different input schemas)
+    # ==================================================================
+
     async def search_posts(self, query: str) -> list[dict[str, Any]]:
+        """Search TikTok — primary actor, then cascade through fallbacks."""
+        # ---- 1. Primary: clockworks/tiktok-scraper ----
+        try:
+            items = await self._run_actor(SEARCH_ACTOR, {
+                "searchQueries": [query],
+                "resultsPerPage": self.search_limit,
+                "maxProfilesPerQuery": self.search_limit,
+            })
+            filtered = self._flatten_items(items)
+            if filtered:
+                logger.info("Primary TikTok search '%s' → %d results.", query, len(filtered))
+                return items  # return raw items; run() will flatten
+        except Exception as exc:
+            logger.error("Primary TikTok search failed for '%s': %s", query, exc)
+
+        # ---- 2. Fallback #1: epctex/tiktok-search-scraper ----
+        logger.warning(
+            "Primary TikTok actor returned 0 rows for '%s' — trying epctex fallback.", query,
+        )
+        fallback1 = await self._epctex_search(query)
+        fallback1_flat = self._flatten_items(fallback1)
+        if fallback1_flat:
+            logger.info("Epctex fallback '%s' → %d results.", query, len(fallback1_flat))
+            return fallback1
+
+        # ---- 3. Fallback #2: automation-lab/tiktok-search-scraper ----
+        logger.warning(
+            "Epctex fallback returned 0 rows for '%s' — trying automation-lab fallback.", query,
+        )
+        fallback2 = await self._automation_lab_search(query)
+        fallback2_flat = self._flatten_items(fallback2)
+        if fallback2_flat:
+            logger.info("Automation-lab fallback '%s' → %d results.", query, len(fallback2_flat))
+            return fallback2
+
+        # ---- 4. Legacy fallback: paul_44/tiktok-search ----
+        logger.warning(
+            "Automation-lab fallback returned 0 rows for '%s' — trying paul_44 legacy.", query,
+        )
+        legacy = await self._paul44_search(query)
+        legacy_flat = self._flatten_items(legacy)
+        if legacy_flat:
+            logger.info("Paul_44 legacy '%s' → %d results.", query, len(legacy_flat))
+        else:
+            logger.warning("All TikTok search actors returned 0 rows for '%s'.", query)
+        return legacy
+
+    async def _epctex_search(self, query: str) -> list[dict[str, Any]]:
+        """Fallback #1 via epctex/tiktok-search-scraper."""
         run_input: dict[str, Any] = {
             "searchQueries": [query],
-            "resultsPerPage": self.search_limit,
-            "maxProfilesPerQuery": self.search_limit,
+            "maxItems": self.search_limit,
         }
         try:
-            items = await self._run_actor(SEARCH_ACTOR, run_input)
+            return await self._run_actor(FALLBACK_SEARCH_ACTOR_1, run_input)
         except Exception as exc:
-            logger.error("TikTok Search failed for '%s': %s", query, exc)
+            logger.error("Epctex TikTok search failed for '%s': %s", query, exc)
             return []
-        logger.info("TikTok Search '%s' → %d results.", query, len(items))
-        return items
+
+    async def _automation_lab_search(self, query: str) -> list[dict[str, Any]]:
+        """Fallback #2 via automation-lab/tiktok-search-scraper."""
+        run_input: dict[str, Any] = {
+            "keywords": [query],
+            "maxResults": self.search_limit,
+        }
+        try:
+            return await self._run_actor(FALLBACK_SEARCH_ACTOR_2, run_input)
+        except Exception as exc:
+            logger.error("Automation-lab TikTok search failed for '%s': %s", query, exc)
+            return []
+
+    async def _paul44_search(self, query: str) -> list[dict[str, Any]]:
+        """Legacy fallback via paul_44/tiktok-search."""
+        run_input: dict[str, Any] = {
+            "query": query,
+            "maxResults": self.search_limit,
+        }
+        try:
+            return await self._run_actor(LEGACY_SEARCH_ACTOR, run_input)
+        except Exception as exc:
+            logger.error("Paul_44 TikTok search failed for '%s': %s", query, exc)
+            return []
 
     @staticmethod
     def _flatten_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -106,14 +191,11 @@ class TiktokCrawler(BaseCrawler):
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
         p = TiktokCrawler._normalize_post(post)
-        return (
-            p.get("text")
-            or p.get("desc")
-            or p.get("description")
-            or p.get("title")
-            or p.get("caption")
-            or ""
-        ).strip()
+        for key in ("text", "desc", "description", "title", "caption"):
+            text = coerce_text(p.get(key))
+            if text:
+                return text
+        return ""
 
     @staticmethod
     def _extract_url(post: dict[str, Any]) -> str:

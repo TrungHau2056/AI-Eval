@@ -11,3 +11,4 @@ build/
 crawled-data/
 backend/test_cases.csv
 backend/test_cases.md
+backend/data/

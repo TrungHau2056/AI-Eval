@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field
 from src.crawlers.facebook_crawler import FacebookCrawler
 from src.crawlers.threads_crawler import ThreadsCrawler
 from src.crawlers.tiktok_crawler import TiktokCrawler
+from src.crawlers.crawl_store import clear_posts, load_posts
+from src.crawlers.crawl_persist import persist_crawl_posts
 from src.config import settings
 from src.api.deps import get_state
 from src.api.routers.frontend_api import (
@@ -78,32 +80,32 @@ async def _mine_and_store(
     return [i.model_dump() for i in fe_intents], crawl_logs
 
 
-def _parse_posts(raw_content: str, platform: str) -> list[dict]:
-    """Parse the crawler's JSON output into normalized rows for the FE results table.
+def _normalize_keywords(keywords: list[str]) -> list[str]:
+    """Strip hashtag markers and underscores so crawlers receive plain search terms."""
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for kw in keywords:
+        clean = " ".join(kw.replace("#", "").replace("_", " ").split()).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            normalized.append(clean)
+    return normalized
 
-    All crawlers emit json.dumps of objects with keys: username, captionText,
-    takenAtFormatted, likeCount, directReplyCount, postUrl, comments. Tolerant of
-    empty/non-JSON content → returns [].
-    """
-    try:
-        items = json.loads(raw_content)
-    except (ValueError, TypeError):
-        return []
-    if not isinstance(items, list):
-        return []
-    posts: list[dict] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        posts.append({
-            "platform": platform,
-            "url": it.get("postUrl") or it.get("url") or "",
-            "postingDate": it.get("takenAtFormatted") or "",
-            "text": it.get("captionText") or it.get("text") or "",
-            "likes": it.get("likeCount") or 0,
-            "commentsCount": it.get("directReplyCount") or 0,
-        })
-    return posts
+
+def _crawl_logs(
+    platform: str,
+    keywords: list[str],
+    new_count: int,
+    total_count: int,
+) -> list[str]:
+    logs = [
+        f"Platform: {platform}",
+        f"Keywords: {', '.join(keywords) if keywords else '(none)'}",
+        f"Crawled {new_count} new posts; {total_count} total in sheet (crawl-only, intents skipped).",
+    ]
+    if new_count == 0:
+        logs.append("No posts found — try different keywords or check Apify actor limits.")
+    return logs
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -130,7 +132,8 @@ class FacebookCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
-    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
+    crawl_posts: list[dict] = Field(default_factory=list, description="All merged posts for FE sheet")
+    new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -158,7 +161,8 @@ class ThreadsCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
-    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
+    crawl_posts: list[dict] = Field(default_factory=list, description="All merged posts for FE sheet")
+    new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -183,7 +187,8 @@ class TiktokCrawlResponse(BaseModel):
     raw_content_preview: str = Field(description="Preview 500 ký tự đầu của raw content")
     raw_content_length: int = Field(description="Tổng số ký tự raw content")
     raw_content: str = Field(description="Toàn bộ raw content đã crawl")
-    crawl_posts: list[dict] = Field(default_factory=list, description="Normalized posts cho FE table")
+    crawl_posts: list[dict] = Field(default_factory=list, description="All merged posts for FE sheet")
+    new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
     error: Optional[str] = None
@@ -211,7 +216,7 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
         )
-        raw_content = await crawler.run(keywords=req.keywords)
+        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return FacebookCrawlResponse(
@@ -223,18 +228,16 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             raw_content="",
             error=f"Crawl error: {exc}",
         )
-    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
-    crawl_posts = _parse_posts(raw_content, req.platform)
+    # ---- Store crawled content: prepend to JSON file + sync pipeline state ----
+    new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, req.keywords
+            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
         )
     else:
-        intents, crawl_logs = [], [
-            f"Platform: {req.platform}",
-            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
-        ]
+        intents, crawl_logs = [], _crawl_logs(
+            req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
+        )
     # ---- Response ----
     return FacebookCrawlResponse(
         success=True,
@@ -243,7 +246,8 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
-        crawl_posts=crawl_posts,
+        crawl_posts=all_posts,
+        new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
@@ -267,7 +271,7 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
         )
-        raw_content = await crawler.run(keywords=req.keywords)
+        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return ThreadsCrawlResponse(
@@ -279,19 +283,15 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             raw_content="",
             error=f"Crawl error: {exc}",
         )
-    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
-    crawl_posts = _parse_posts(raw_content, req.platform)
+    new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, req.keywords
+            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
         )
     else:
-        intents, crawl_logs = [], [
-            f"Platform: {req.platform}",
-            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
-        ]
-    # ---- Response ----
+        intents, crawl_logs = [], _crawl_logs(
+            req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
+        )
     return ThreadsCrawlResponse(
         success=True,
         platform=req.platform,
@@ -299,7 +299,8 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
-        crawl_posts=crawl_posts,
+        crawl_posts=all_posts,
+        new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
@@ -323,7 +324,7 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             apify_token=token,
             search_limit=req.search_limit,
         )
-        raw_content = await crawler.run(keywords=req.keywords)
+        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return TiktokCrawlResponse(
@@ -336,18 +337,15 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             error=f"Crawl error: {exc}",
         )
     
-    # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
-    crawl_posts = _parse_posts(raw_content, req.platform)
+    new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, req.keywords, source_type="tiktok"
+            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords), source_type="tiktok"
         )
     else:
-        intents, crawl_logs = [], [
-            f"Platform: {req.platform}",
-            f"Crawled {len(crawl_posts)} posts (crawl-only, intents skipped).",
-        ]
+        intents, crawl_logs = [], _crawl_logs(
+            req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
+        )
     return TiktokCrawlResponse(
         success=True,
         platform=req.platform,
@@ -355,7 +353,8 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
         raw_content_preview=raw_content[:500],
         raw_content_length=len(raw_content),
         raw_content=raw_content,
-        crawl_posts=crawl_posts,
+        crawl_posts=all_posts,
+        new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
     )
@@ -363,6 +362,21 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+@router.get("/posts")
+async def get_crawl_posts():
+    """Return all persisted crawl posts (newest batches at the top)."""
+    posts = load_posts()
+    return {"posts": posts, "count": len(posts)}
+
+
+@router.post("/posts/reset")
+async def reset_crawl_posts():
+    """Clear persisted crawl sheet + in-memory social content."""
+    clear_posts()
+    get_state().raw_social_content = ""
+    return {"success": True, "posts": [], "count": 0}
+
+
 @router.get("/health")
 async def crawl_health():
     """Kiểm tra crawl module hoạt động."""
