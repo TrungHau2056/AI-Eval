@@ -1,5 +1,5 @@
 from src.export.exporter import Exporter
-from src.models.schemas import Intent, Persona, TestCasePrompt
+from src.models.schemas import FEIntent, Intent, Persona, TestCasePrompt
 
 
 def _make_data():
@@ -26,3 +26,35 @@ def test_export_markdown():
     assert "# Test Cases" in md
     assert "Yeu cau hoan tien" in md
     assert "cho minh hoan tien nhe" in md
+
+
+def test_export_intents_json():
+    fe = FEIntent(
+        id="abc123",
+        name="Hoan tien",
+        phase="SUPPORT",
+        utterance="cho minh hoan tien",
+        triggerMoment="Mua sai hang",
+        source="data",
+        coverage="confirmed",
+    )
+    internal = Intent(
+        id="abc123",
+        intent_name="Hoan tien",
+        context="User mua sai san pham",
+        goal="Duoc hoan tien",
+        evidence=["cho minh hoan tien"],
+    )
+    payload = Exporter.intents_to_json_dict([fe], [internal])
+    assert payload["count"] == 1
+    assert payload["intents"][0]["name"] == "Hoan tien"
+    assert payload["intents"][0]["goal"] == "Duoc hoan tien"
+    assert payload["intents"][0]["evidence"] == ["cho minh hoan tien"]
+
+
+def test_export_intents_csv():
+    fe = FEIntent(id="x1", name="Test intent", utterance="hello", triggerMoment="now")
+    csv_body = Exporter.intents_to_csv([fe])
+    assert "id,name,phase" in csv_body.replace(" ", "")
+    assert "Test intent" in csv_body
+    assert "hello" in csv_body

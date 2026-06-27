@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routers.frontend_api import router as frontend_router
 from src.api.routers.crawl import router as crawl_router
+from src.api.routers.export import router as export_router
 from src.observability.langfuse import flush_langfuse
-from src.api.routers.crawl import router as crawl_router
 
 
 
@@ -29,6 +29,7 @@ app.add_middleware(
 
 app.include_router(frontend_router)
 app.include_router(crawl_router)
+app.include_router(export_router)
 
 @app.get("/api/health")
 def health():

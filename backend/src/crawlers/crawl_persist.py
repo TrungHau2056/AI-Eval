@@ -5,7 +5,15 @@ import json
 from typing import Any
 
 from src.api.deps import get_state
-from src.crawlers.crawl_store import posts_to_raw_content, prepend_posts
+from src.crawlers.crawl_store import load_posts, posts_to_raw_content, prepend_posts
+
+
+def sync_social_content_to_state() -> str:
+    """Rebuild in-memory social content from the persisted crawl sheet."""
+    posts = load_posts()
+    content = posts_to_raw_content(posts)
+    get_state().raw_social_content = content
+    return content
 
 
 def parse_crawler_posts(raw_content: str, platform: str) -> list[dict[str, Any]]:

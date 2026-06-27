@@ -26,3 +26,20 @@ Hãy phân tích dữ liệu phản hồi thô được cung cấp (comment, cha
 6. XỬ LÝ DỮ LIỆU KHÔNG ĐỦ (Fallback Behavior): Nếu dữ liệu đầu vào quá ít, KHÔNG được tự bịa thêm Intent không có bằng chứng từ data. Thay vào đó, sinh số Intent tối đa có thể xác minh được từ dữ liệu thực và thêm mục "data_gap_warning" vào JSON đầu ra.
 
 Trả về JSON theo đúng schema yêu cầu, không thêm text nào khác.
+
+# OUTPUT JSON SCHEMA (bắt buộc)
+{
+  "intents": [
+    {
+      "intent_num": 1,
+      "intent_name": "Động từ + đối tượng cụ thể",
+      "utterance": "câu chat thật viết tắt",
+      "moment": "Where + What doing + What worried",
+      "phase": "giai đoạn domain",
+      "source": "data",
+      "raw_observation": "trích dẫn từ data",
+      "why_valid": "lý do intent hợp lệ"
+    }
+  ],
+  "data_gap_warning": "chỉ thêm khi data quá ít"
+}

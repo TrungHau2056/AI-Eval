@@ -52,9 +52,13 @@ export default function App() {
   const [viewingTestCase, setViewingTestCase] = useState<TestCase | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
 
-  // Reset backend state on every page load (F5) so each reload = fresh session.
-  // Within a session, crawling multiple platforms still accumulates data normally.
+  // Reset pipeline state once per browser tab load (F5). Skip on Vite HMR remounts so
+  // crawled social data in memory is not wiped mid-session.
   useEffect(() => {
+    const w = window as Window & { __pipelineSessionInit?: boolean };
+    if (w.__pipelineSessionInit) return;
+    w.__pipelineSessionInit = true;
+
     fetch("/api/state/reset", { method: "POST" })
       .then((res) => res.json())
       .then((data) => {
@@ -160,6 +164,11 @@ export default function App() {
 
       if (result.fallback) {
         showToast("Demo Mode: Extracted typical intents from transcript parameters.", "info");
+      } else if ((result.intents?.length ?? 0) === 0) {
+        showToast(
+          "Discovery finished but found 0 intents. Check that crawl data or uploaded text is not empty, and verify your LLM API key.",
+          "error",
+        );
       } else {
         showToast(`Successfully extracted ${result.intents.length} unique curated intents!`, "success");
       }

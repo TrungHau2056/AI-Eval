@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.api.deps import get_memory, get_state, reset_state
-from src.crawlers.crawl_store import clear_posts
+from src.crawlers.crawl_persist import sync_social_content_to_state
 from src.config import settings
 from src.ingestion.loader_factory import get_loader
 from src.ingestion.normalizer import merge_sources
@@ -321,6 +321,9 @@ def discover_intents(req: DiscoverRequest):
     # Data content from all available sources: paste-text (ưu tiên) hoặc raw_input đã
     # ingest, GỘP THÊM dữ liệu social đã crawl (state.raw_social_content). Không gắn nhãn
     # nguồn ở vòng này — chỉ nối nội dung lại để mine intents.
+    if not state.raw_social_content.strip():
+        sync_social_content_to_state()
+
     parts: list[str] = []
     if req.logsText and req.logsText.strip():
         state.raw_input = RawInput(source_type="text", content=req.logsText)
@@ -333,7 +336,10 @@ def discover_intents(req: DiscoverRequest):
 
     prd_content = state.raw_prd_content
     if not data_content.strip() and not prd_content.strip():
-        raise HTTPException(400, "Please enter some logs text or upload a file first.")
+        raise HTTPException(
+            400,
+            "No input data found. Upload a file, paste text, or crawl social data first.",
+        )
 
     if not state.trace_id:
         state.trace_id = uuid.uuid4().hex
@@ -379,6 +385,13 @@ def discover_intents(req: DiscoverRequest):
     state.intents = fe_intents
     state.internal_intents = [Intent(**r) for r in results]
     logger.info("Stored %d FE intents (data=%d, prd=%d)", len(fe_intents), len(data_intents), len(prd_intents))
+    if not fe_intents:
+        logger.warning(
+            "Discovery returned 0 intents | data_chars=%d | prd_chars=%d | social_chars=%d",
+            len(data_content),
+            len(prd_content),
+            len(state.raw_social_content or ""),
+        )
 
     return {"intents": [i.model_dump() for i in fe_intents], "fallback": False}
 
@@ -520,7 +533,8 @@ def generate_testcases(req: GenerateTestCasesRequest):
 def reset_pipeline():
     logger.info("POST /api/state/reset")
     state = reset_state()
-    clear_posts()
+    # Keep persisted crawl sheet; only rehydrate in-memory social content for /api/discover.
+    sync_social_content_to_state()
     return {
         "success": True,
         "state": {

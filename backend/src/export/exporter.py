@@ -1,10 +1,105 @@
 import csv
 import io
+import json
+from datetime import datetime, timezone
+from typing import Any
 
-from src.models.schemas import Intent, Persona, TestCasePrompt
+from src.models.schemas import FEIntent, Intent, Persona, TestCasePrompt
 
 
 class Exporter:
+    @staticmethod
+    def _intent_row(
+        fe: dict[str, Any],
+        internal: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": fe.get("id", ""),
+            "name": fe.get("name", ""),
+            "phase": fe.get("phase", ""),
+            "utterance": fe.get("utterance", ""),
+            "trigger_moment": fe.get("triggerMoment", ""),
+            "source": fe.get("source", ""),
+            "coverage": fe.get("coverage", ""),
+            "selected": fe.get("selected", True),
+            "matched_ids": "; ".join(fe.get("matchedIds") or []),
+        }
+        if internal:
+            row.update({
+                "context": internal.get("context", ""),
+                "goal": internal.get("goal", ""),
+                "evidence": "; ".join(internal.get("evidence") or []),
+                "raw_observation": internal.get("raw_observation", ""),
+                "why_valid": internal.get("why_valid", ""),
+            })
+        return row
+
+    @staticmethod
+    def intents_to_json_dict(
+        intents: list[FEIntent] | list[dict],
+        internal_intents: list[Intent] | list[dict] | None = None,
+    ) -> dict[str, Any]:
+        fe_list = [i.model_dump() if hasattr(i, "model_dump") else i for i in intents]
+        internal_map: dict[str, dict[str, Any]] = {}
+        if internal_intents:
+            for item in internal_intents:
+                data = item.model_dump() if hasattr(item, "model_dump") else item
+                internal_map[data.get("id", "")] = data
+
+        enriched: list[dict[str, Any]] = []
+        for fe in fe_list:
+            entry = dict(fe)
+            internal = internal_map.get(fe.get("id", ""))
+            if internal:
+                entry["context"] = internal.get("context", "")
+                entry["goal"] = internal.get("goal", "")
+                entry["evidence"] = internal.get("evidence", [])
+                entry["raw_observation"] = internal.get("raw_observation", "")
+                entry["why_valid"] = internal.get("why_valid", "")
+            enriched.append(entry)
+
+        return {
+            "exportedAt": datetime.now(timezone.utc).isoformat(),
+            "count": len(enriched),
+            "intents": enriched,
+        }
+
+    @staticmethod
+    def intents_to_json(
+        intents: list[FEIntent] | list[dict],
+        internal_intents: list[Intent] | list[dict] | None = None,
+    ) -> str:
+        return json.dumps(
+            Exporter.intents_to_json_dict(intents, internal_intents),
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    @staticmethod
+    def intents_to_csv(
+        intents: list[FEIntent] | list[dict],
+        internal_intents: list[Intent] | list[dict] | None = None,
+    ) -> str:
+        fe_list = [i.model_dump() if hasattr(i, "model_dump") else i for i in intents]
+        internal_map: dict[str, dict[str, Any]] = {}
+        if internal_intents:
+            for item in internal_intents:
+                data = item.model_dump() if hasattr(item, "model_dump") else item
+                internal_map[data.get("id", "")] = data
+
+        rows = [
+            Exporter._intent_row(fe, internal_map.get(fe.get("id", "")))
+            for fe in fe_list
+        ]
+        if not rows:
+            rows = [Exporter._intent_row({})]
+
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+        return output.getvalue()
+
     @staticmethod
     def to_csv(
         test_prompts: list[TestCasePrompt] | list[dict],

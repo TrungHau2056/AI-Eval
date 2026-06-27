@@ -52,6 +52,15 @@ def test_intent_agent_parse():
     assert intents[1]["intent_name"] == "Bao tram sac hong"
 
 
+def test_intent_agent_parse_name_alias():
+    response = '{"intents": [{"name": "Dat lich lai thu VF8", "utterance": "dat lai thu vf8 t7", "trigger_moment": "Dang xem web"}]}'
+    agent = IntentAgent(MockLLM(response))
+    intents = agent._parse(response)
+    assert len(intents) == 1
+    assert intents[0]["intent_name"] == "Dat lich lai thu VF8"
+    assert intents[0]["moment"] == "Dang xem web"
+
+
 def test_intent_agent_deduplicate():
     agent = IntentAgent(MockLLM(""))
     intents = [

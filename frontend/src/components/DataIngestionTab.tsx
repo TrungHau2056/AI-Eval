@@ -197,11 +197,12 @@ export default function DataIngestionTab({
     e.target.value = "";
   };
 
-  // Run Intent Discovery from any uploaded/pasted source (file / PRD / text). At least one required.
+  // Run Intent Discovery from uploaded/pasted sources and/or persisted social crawl data.
   const handleSubmit = async () => {
     const hasFiles = stagedFiles.length > 0 || prdFile;
-    if (!hasFiles && logsText.trim().length === 0) {
-      alert("Add at least one file/PRD or paste raw text first.");
+    const hasCrawledData = crawledPosts.length > 0;
+    if (!hasFiles && logsText.trim().length === 0 && !hasCrawledData) {
+      alert("Add a file/PRD, paste raw text, or crawl social data first.");
       return;
     }
     setLoading(true);

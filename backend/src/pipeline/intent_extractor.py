@@ -50,7 +50,15 @@ class IntentAgent:
         return workflow.compile()
 
     def _prepare_chunks_node(self, state: IntentState) -> dict[str, Any]:
-        raw_content = state["raw_input"].content
+        raw_content = (state["raw_input"].content or "").strip()
+        if not raw_content:
+            logger.warning("IntentGraph | prepare_chunks | empty input content")
+            return {
+                "chunks": [],
+                "current_chunk_idx": 0,
+                "all_intents": [],
+                "final_intents": [],
+            }
         chunks = chunk_text(raw_content, max_tokens=self.max_chunk_tokens)
         logger.info("IntentGraph | prepare_chunks | total_chunks=%d", len(chunks))
         return {
@@ -175,11 +183,19 @@ class IntentAgent:
         items = data.get("intents", data if isinstance(data, list) else [])
         results: list[dict[str, Any]] = []
         for item in items:
-            intent_name = item.get("intent_name") or ""
+            if not isinstance(item, dict):
+                continue
+            intent_name = (
+                item.get("intent_name")
+                or item.get("name")
+                or item.get("title")
+                or item.get("goal")
+                or ""
+            ).strip()
             if not intent_name:
                 continue
-            utterance = item.get("utterance") or ""
-            moment = item.get("moment") or ""
+            utterance = item.get("utterance") or item.get("typical_utterance") or ""
+            moment = item.get("moment") or item.get("trigger_moment") or item.get("triggerMoment") or item.get("context") or ""
             results.append(Intent(
                 intent_num=item.get("intent_num", 0),
                 intent_name=intent_name,

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Intent } from "../types";
 import AutoTextarea from "./AutoTextarea";
+import { downloadIntentsCsv, downloadIntentsJson } from "../utils/exportIntents";
 
 interface IntentCurationTabProps {
   intents: Intent[];
@@ -54,6 +55,22 @@ export default function IntentCurationTab({
   const visibleIntents =
     coverageFilter === "all" ? intents : intents.filter((i) => (i.coverage || "") === coverageFilter);
 
+  const handleDownloadJson = () => {
+    if (intents.length === 0) {
+      alert("No intents to export. Run Intent Discovery first.");
+      return;
+    }
+    downloadIntentsJson(intents);
+  };
+
+  const handleDownloadCsv = () => {
+    if (intents.length === 0) {
+      alert("No intents to export. Run Intent Discovery first.");
+      return;
+    }
+    downloadIntentsCsv(intents);
+  };
+
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       
@@ -98,6 +115,24 @@ export default function IntentCurationTab({
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleDownloadJson}
+              disabled={intents.length === 0}
+              className="flex items-center gap-2 px-4 py-2 text-stone-700 bg-white border border-stone-200 rounded-none font-bold text-[11px] uppercase tracking-wider hover:bg-stone-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">data_object</span>
+              Download JSON
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadCsv}
+              disabled={intents.length === 0}
+              className="flex items-center gap-2 px-4 py-2 text-stone-700 bg-white border border-stone-200 rounded-none font-bold text-[11px] uppercase tracking-wider hover:bg-stone-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">download</span>
+              Download CSV
+            </button>
             <button
               onClick={onAddIntent}
               className="flex items-center gap-2 px-6 py-2 text-[#ff4d00] border border-[#ff4d00] rounded-none font-bold text-[11px] uppercase tracking-wider hover:bg-[#ff4d00]/10 transition-all cursor-pointer"
