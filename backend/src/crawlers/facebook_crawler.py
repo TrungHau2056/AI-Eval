@@ -140,8 +140,9 @@ class FacebookCrawler(BaseCrawler):
     async def _legacy_search_posts(self, query: str, limit: int) -> list[dict[str, Any]]:
         run_input: dict[str, Any] = {
             "query": query,
-            "resultsCount": limit,
-            "searchType": "top",
+            "search_type": "posts",
+            "max_results": min(limit, 200),
+            "recent_posts": False,
         }
         try:
             return await self._run_actor(LEGACY_SEARCH_ACTOR, run_input)
@@ -245,6 +246,16 @@ class FacebookCrawler(BaseCrawler):
 
         return self._format_output(all_posts, limit=self.posts_limit)
 
+    def _filter_usable_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Bỏ item lỗi / không có text (vd. apify/facebook-posts-scraper trả error object)."""
+        usable: list[dict[str, Any]] = []
+        for post in posts:
+            if post.get("error"):
+                continue
+            if self._extract_text(post):
+                usable.append(post)
+        return usable
+
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
         for key in ("text", "postText", "message", "message_rich", "content", "body"):
@@ -283,7 +294,14 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_author(post: dict[str, Any]) -> str:
-        author = post.get("user") or post.get("userName") or post.get("author") or post.get("pageName") or ""
+        author = (
+            post.get("user")
+            or post.get("userName")
+            or post.get("author")
+            or post.get("pageName")
+            or post.get("author_title")
+            or ""
+        )
         if isinstance(author, dict):
             author = author.get("name") or author.get("username") or ""
         return str(author).strip()

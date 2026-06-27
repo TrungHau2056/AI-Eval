@@ -8,7 +8,7 @@ __pycache__/
 dist/
 build/
 .claude/
-
+crawled-data/
 backend/test_cases.csv
 backend/test_cases.md
 backend/data/
