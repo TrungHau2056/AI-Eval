@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Actor IDs (Apify Store) — pay-per-event, works on free plan credits
 AUTOCOMPLETE_ACTOR = "automation-lab/google-autocomplete-scraper"
-SEARCH_ACTOR = "scraper_one/facebook-posts-search"
+# scraper_one/facebook-posts-search often returns 0 items (provider rate limit).
+SEARCH_ACTOR = "scrapeforge/facebook-search-posts"
 POSTS_ACTOR = "apify/facebook-posts-scraper"
 
 
@@ -84,12 +85,13 @@ class FacebookCrawler(BaseCrawler):
         query: str,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Tìm bài viết Facebook qua scraper_one/facebook-posts-search."""
+        """Tìm bài viết Facebook qua scrapeforge/facebook-search-posts."""
         limit = limit or self.search_limit
         run_input: dict[str, Any] = {
             "query": query,
-            "resultsCount": limit,
-            "searchType": "top",
+            "search_type": "posts",
+            "max_results": min(limit, 200),
+            "recent_posts": False,
         }
         try:
             items = await self._run_actor(SEARCH_ACTOR, run_input)
@@ -171,7 +173,7 @@ class FacebookCrawler(BaseCrawler):
             urls = urls[: self.posts_limit]
 
             if urls:
-                scraped = await self.scrape_posts(urls)
+                scraped = self._filter_usable_posts(await self.scrape_posts(urls))
                 if scraped:
                     all_posts.extend(scraped)
                     continue
@@ -181,18 +183,22 @@ class FacebookCrawler(BaseCrawler):
 
         return self._format_output(all_posts, limit=self.posts_limit)
 
+    def _filter_usable_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Bỏ item lỗi / không có text (vd. apify/facebook-posts-scraper trả error object)."""
+        usable: list[dict[str, Any]] = []
+        for post in posts:
+            if post.get("error"):
+                continue
+            if self._extract_text(post):
+                usable.append(post)
+        return usable
+
     @staticmethod
     def _extract_text(post: dict[str, Any]) -> str:
-        text = (
-            post.get("text")
-            or post.get("postText")
-            or post.get("message")
-            or post.get("content")
-            or post.get("body")
-            or ""
-        ).strip()
-        if text:
-            return text
+        for key in ("text", "postText", "message", "content", "body"):
+            val = post.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
         return FacebookCrawler._attachment_caption(post)
 
     @staticmethod
@@ -226,7 +232,14 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_author(post: dict[str, Any]) -> str:
-        author = post.get("user") or post.get("userName") or post.get("author") or post.get("pageName") or ""
+        author = (
+            post.get("user")
+            or post.get("userName")
+            or post.get("author")
+            or post.get("pageName")
+            or post.get("author_title")
+            or ""
+        )
         if isinstance(author, dict):
             author = author.get("name") or author.get("username") or ""
         return str(author).strip()
@@ -236,7 +249,16 @@ class FacebookCrawler(BaseCrawler):
         reactions = post.get("reactions")
         if isinstance(reactions, dict) and reactions.get("like") is not None:
             return int(reactions["like"])
-        for key in ("reactionsCount", "likes", "likeCount", "reactionLikeCount", "likesCount"):
+        if isinstance(reactions, (int, float)):
+            return int(reactions)
+        for key in (
+            "reactions_count",
+            "reactionsCount",
+            "likes",
+            "likeCount",
+            "reactionLikeCount",
+            "likesCount",
+        ):
             val = post.get(key)
             if val is not None:
                 return int(val)
@@ -247,7 +269,7 @@ class FacebookCrawler(BaseCrawler):
         comments = post.get("comments")
         if isinstance(comments, int):
             return comments
-        for key in ("commentsCount", "commentCount", "directReplyCount"):
+        for key in ("comments_count", "commentsCount", "commentCount", "directReplyCount"):
             val = post.get(key)
             if val is not None:
                 return int(val)
@@ -255,7 +277,7 @@ class FacebookCrawler(BaseCrawler):
 
     @staticmethod
     def _extract_share_count(post: dict[str, Any]) -> int:
-        for key in ("sharesCount", "shareCount", "shares", "repostCount"):
+        for key in ("reshare_count", "sharesCount", "shareCount", "shares", "repostCount"):
             val = post.get(key)
             if val is not None:
                 return int(val)

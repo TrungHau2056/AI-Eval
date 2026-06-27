@@ -1,125 +1,131 @@
 [
   {
-    "username": "gray_deee",
-    "isVerified": true,
-    "captionText": "Bener-bener cinta produk dalam negri 🇻🇳#vinfast",
-    "takenAtFormatted": "1758682912",
-    "likeCount": 726,
-    "directReplyCount": 186,
+    "username": "_pwming",
+    "isVerified": false,
+    "captionText": "gợi ý địa điểm du lịch đáng đi nhất trong mùa hè này:",
+    "takenAtFormatted": "1779804737",
+    "likeCount": 5891,
+    "directReplyCount": 33,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@gray_deee/post/DO-Brttkj9L",
+    "postUrl": "https://www.threads.net/@_pwming/post/DYzgILzkhbI",
     "comments": [
-      "Masnya nggak tahu esemka yang pesen 6.000 unit? Masnya orang otomotif loh",
-      "Vietnam 10 taun ini dapat revolusi industri. Dan industriliasi... \n\nIndonesia dapat Jokowi Paket Gibran",
-      "Mereka udah jadi produsen, kita masih setia jadi konsumen 😅"
+      "T gợi ý là mình nên thu nhỏ lại r vào sống trong ngăn đá tủ lạnh",
+      "Vẫn mặc áo hoodie kìa má =))",
+      "No với Mon còn slot kh cho đi vs"
     ]
   },
   {
-    "username": "duy.rom",
+    "username": "ngoc_awn.b",
     "isVerified": false,
-    "captionText": "Mấy thằng hay chửi là mấy thằng ko có xe =))))\nTau vinno nè chửi đi hẹ hẹ",
-    "takenAtFormatted": "1763110536",
-    "likeCount": 79,
-    "directReplyCount": 14,
+    "captionText": "Tương truyền rằng, khi đến thành cổ Dukezong ở Shangri-La và quay đủ 3 vòng kinh luân, mọi điều không may sẽ ở lại phía sau, còn bình an thì sẽ theo mình trên những chặng đường tiếp theo ☁️✨",
+    "takenAtFormatted": "1778958609",
+    "likeCount": 1906,
+    "directReplyCount": 7,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@duy.rom/post/DRB-tdAE4M2",
+    "postUrl": "https://www.threads.net/@ngoc_awn.b/post/DYaSRg4E3Wn",
     "comments": [
-      "Chả biết rẻ chỗ nào , đi chưa được 15km mà sm lấy 130k ko pít chém ko",
-      "Tự ép giá nhau thôi.",
-      "Lado họ đón khách Liên Khương về Đà Lạt vẫn 150k từ ngày xe xăng, cho tới khi mua xe điện."
+      "Ib mình cái lịch với",
+      "Xem video Shangri-La xong lại muốn book vé đi trốn vài ngày thật 🥹\nBên mình đang có tour LỆ GIANG – SHANGRILA 5N4Đ\nBay thẳng từ Cát Bi (Có xe đưa đón khứ hồi từ Hà Nội)\n ✈ Giá trọn gói chỉ 13tr990k thui nha. \n☁️ Shangrila – vùng đất bất tử đẹp như phim\n🏮 Thành cổ Lệ Giang hơn 800 năm tuổi\n💙 Lam Nguyệt Cốc xanh ngọc siêu thực\n❄️ Núi Tuyết Ngọc Long phủ tuyết quanh năm\n✨ 𝐓𝐚̣̆𝐧𝐠 𝐯𝐞́ 𝐬𝐡𝐨𝐰 𝐀̂́𝐧 𝐓𝐮̛𝐨̛̣𝐧𝐠 𝐋𝐞̣̂ 𝐆𝐢𝐚𝐧𝐠 \nIb để mình gửi lịch trình chi tiết tham khảo nha",
+      "Thích cái đoạn bay thẳng từ Cát Bi nè, đỡ phải lếch thếch transit mệt mỏi. Cho mình xin lịch trình chi tiết kèm ngày khởi hành gần nhất với nha."
     ]
   },
   {
-    "username": "chuyencua_chungyoung",
+    "username": "ng_khngoc09",
     "isVerified": false,
-    "captionText": "Vinfast VF8 đụng độ với Tesla Model 3 tại Mỹ\nCre: Bầu Thịnh - Vòng Quanh Nước Mỹ",
-    "takenAtFormatted": "1727581805",
-    "likeCount": 232,
-    "directReplyCount": 66,
+    "captionText": "7 năm chơi với nhau lần đầu đc đi du lịch chung chụp hẳn hai kiểu ảnh-))",
+    "takenAtFormatted": "1781807145",
+    "likeCount": 13724,
+    "directReplyCount": 222,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@chuyencua_chungyoung/post/DAfJCEgSXgG",
+    "postUrl": "https://www.threads.net/@ng_khngoc09/post/DZvLqRwj9z1",
     "comments": [
-      "túi khí tesla bền vl =)))",
-      "Vết lõm ở đầu vin là bị đẩy vào con xe đang đỗ chứ k phải bị tông cơ mới ác 🤣xe cứng",
-      "Vinfaat tốt nhỉ? Vậy tại sao phải nâng khống doanh thu tại Mỹ để bị kiện 🥲 thế ng Mỹ họ tiêu dùng ko thông thái rùiii ☺️"
+      "đớp lồn gì mà đẹp vậy 2 con kia?",
+      "Đúng là người đẹp thường chơi với nhau :))",
+      "Clean the mirror lol"
     ]
   },
   {
-    "username": "rafael_mangiafico",
+    "username": "naudaphin",
     "isVerified": false,
-    "captionText": "Ferrari Spider F8 🕷️🕷️",
-    "takenAtFormatted": "1781544816",
-    "likeCount": 7,
+    "captionText": "du lịch đà nẽng >\\\\<",
+    "takenAtFormatted": "1779711905",
+    "likeCount": 1565,
+    "directReplyCount": 45,
+    "repostCount": 0,
+    "postUrl": "https://www.threads.net/@naudaphin/post/DYwvPDIAAeN",
+    "comments": [
+      "có cần há tág wlw k ta…",
+      "Xin địa chỉ vs bạn. Chỗ này là home à bạn?",
+      "khách iu quá xịn"
+    ]
+  },
+  {
+    "username": "bunrieujamie",
+    "isVerified": false,
+    "captionText": "Du lịch kể mẹ -  Du lịch giấu mẹ",
+    "takenAtFormatted": "1782131864",
+    "likeCount": 2051,
+    "directReplyCount": 1,
+    "repostCount": 0,
+    "postUrl": "https://www.threads.net/@bunrieujamie/post/DZ43A3eCekH",
+    "comments": [
+      "đi với bồ lại chả giấu😔"
+    ]
+  },
+  {
+    "username": "hanainsapa",
+    "isVerified": false,
+    "captionText": "Mình 34 tuổi, cùng hơn 10 năm kinh nghiệm làm việc trong ngành du lịch khách sạn\nMình chọn 2026 là năm khởi nghiệp của mình, với mong muốn đóng góp vào phát triển DU LỊCH BỀN VỮNG của Việt Nam 🇻🇳",
+    "takenAtFormatted": "1782529040",
+    "likeCount": 1,
     "directReplyCount": 0,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@rafael_mangiafico/post/DZnXO9mkWGP",
+    "postUrl": "https://www.threads.net/@hanainsapa/post/DaEskOXgb2e",
     "comments": []
   },
   {
-    "username": "thuduyen.guudd",
+    "username": "congt_6812",
     "isVerified": false,
-    "captionText": "Mình là nữ, tài chính max 500 củ thì nên mua xe điện gì mọi người ơiiii 😝\nEm đi đường Hà Nội, về quê các thứ khoảng 60-70km ạ",
-    "takenAtFormatted": "1774790995",
-    "likeCount": 408,
-    "directReplyCount": 68,
+    "captionText": "Không gái gú, không nhậu nhẹt, 5 thằng đực với nhau. \nQuả là 1 chuyến du lịch vô nghĩa,\nBiết thế ở mẹ nhà còn hơn !",
+    "takenAtFormatted": "1776007532",
+    "likeCount": 21803,
+    "directReplyCount": 275,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@thuduyen.guudd/post/DWeFawPkqc-",
+    "postUrl": "https://www.threads.net/@congt_6812/post/DXCVxosCRhZ",
     "comments": [
-      "Sale Vinfast nhìn thấy bài này thì tư vấn cho em với",
-      "Vf5 là lành nhất vì nó chả có gì để lỗi, nó cơ bản như con vios trc sinh ra để chạy dịch vụ ấy . 500 tr thừa sức mua vf5 mới r . Nhưng có tiền t vẫn vote mua vf6 plus có adas vào lái xe nhàn lắm.",
-      "Thêm ít tiền mua vf5 vf6. Chứ ngoài ra b dám mua xe TQ k. Geely EX2 vừa ra mắt 500 đó"
+      "Hỏng ấy 5 đứa ráp tàu lửa 5 toa đi. Vui liền à🤣🤣",
+      "nhớ hồi đi thi dgnl ở nhà nghỉ mà tâm sự đêm sao tới hồi 4 thag cởi trần nằm ôm nhau ngủ tới sáng ngon ơ",
+      "Thế mấy ông đàn ông... Trong thâm tâm lúc nào đi du lịch cũng phải có gái hả..."
     ]
   },
   {
-    "username": "h.huyen.93",
+    "username": "maye_wn",
     "isVerified": false,
-    "captionText": "Story của lão chồng sau hơn 6 tháng trải nghiệm VF8\nTrước có yêu hãng X giấu tên như vậy đâu nhờ 🤭",
-    "takenAtFormatted": "1767493901",
-    "likeCount": 40,
-    "directReplyCount": 5,
+    "captionText": "Du lịch Việt Nam đang siêu hot bên bển, cái t thắc mắc là sao có thể cook ra mấy con ảnh đẹp v😭",
+    "takenAtFormatted": "1781496823",
+    "likeCount": 37567,
+    "directReplyCount": 316,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@h.huyen.93/post/DTEnULgEgY8",
+    "postUrl": "https://www.threads.net/@maye_wn/post/DZl7xOqk6I0",
     "comments": [
-      "Đc anh idol của vợ làm FOH quá đỉnh…",
-      "Xời.. cứ p gọi là đỉnh của chópppp",
-      "Bạn ơi.. bạn hỏi đúng người nghèo có lối sống tài phiệt rồi🤣🤣🤣🤣"
+      "T vừa đi mò đc cách chỉnh của ảnh đầu tiên. Chụp bằng iPhone sau đấy vào app tên là Mix chọn màu FJGQ. \nCó thêm tấm hắt sáng càng tốt nhíe: https://s.shopee.vn/2qSDRlZeRV\nAi test ra đc màu xinh cmt t biết với nha🫶🏻",
+      "Xem vlog của mấy bả thấy mấy bả dùng này nhiều lắm, mà tiện thiệt https://s.shopee.vn/2LVwsVpHys\nCòn quốc dân thì chắc là cái này rui:",
+      "Đi chơi k quên chống nắng nha mí nàng, đc cái ai lười thì bôi e này thêm tý son là ra đường đc lun"
     ]
   },
   {
-    "username": "khanhchannel.vn",
+    "username": "iamruych.21",
     "isVerified": false,
-    "captionText": "VINFAST VF8 THẾ HỆ MỚI (VF8 ALL - NEW) #khanhchannel #vinfastvf8 #vinfast #khanhchannelworkshop",
-    "takenAtFormatted": "1782277032",
-    "likeCount": 0,
-    "directReplyCount": 0,
+    "captionText": "Đặc quyền làm người yêu tớ : được tớ đưa du lịch 1 tháng 1 lần 😋",
+    "takenAtFormatted": "1780627745",
+    "likeCount": 1435,
+    "directReplyCount": 119,
     "repostCount": 0,
-    "postUrl": "https://www.threads.net/@khanhchannel.vn/post/DZ9L5TbkxuA",
-    "comments": []
-  },
-  {
-    "username": "carguideph",
-    "isVerified": true,
-    "captionText": "How important is the Philippines to VinFast? Very.\nhttps://www.carguide.ph/2026/06/the-philippines-accounts-for-25-percent.html",
-    "takenAtFormatted": "1782432125",
-    "likeCount": 0,
-    "directReplyCount": 0,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@carguideph/post/DaBzt0Nkx_z",
-    "comments": []
-  },
-  {
-    "username": "tsglass435",
-    "isVerified": false,
-    "captionText": "So I finally got a big boy car I have always wanted my v8 manual and I jumped on it last night and I don regret it i absolutely love it",
-    "takenAtFormatted": "1774375044",
-    "likeCount": 442,
-    "directReplyCount": 82,
-    "repostCount": 0,
-    "postUrl": "https://www.threads.net/@tsglass435/post/DWRsDeFFSyH",
+    "postUrl": "https://www.threads.net/@iamruych.21/post/DZMCIjSEko3",
     "comments": [
-      "i dont like american cars but im proud u got a stick shift v8 my nigga u a real man",
-      "don’t let ppl talk shit on it, nice car man enjoy it",
-      "Congrats brother! Nothing like the feeling of getting the car you’ve had your eyes on."
+      "Có cũng đc, ko cũng đc.Đừng tháng đi về 2 lần là đc :)))",
+      "❌ Tìm người yêu \n✅ Tìm tương tác \n😂😂",
+      "đọc cap này nghe rỉ hơn mấy cap có: 🔝/18,19."
     ]
   }
 ]
