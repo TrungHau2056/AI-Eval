@@ -174,51 +174,68 @@ export default function App() {
   // (Python /api/crawl/{platform}). Returns { intents, crawlLogs, crawlPosts } so the
   // DataIngestionTab trace panel can render the crawl pipeline output.
   const handleCrawlSocial = async (
-    platform: string,
+    platforms: string[],
     domain: string,
     keywords?: string[],
+    maxPosts?: number,
   ): Promise<{ crawlPosts: any[]; crawlLogs: string[] }> => {
     // Crawl-only (extract_intents:false). Intents are produced later by Run Intent
-    // Discovery, which reads the crawled content the backend persists.
+    // Discovery, which reads the crawled content the backend persists per platform.
     // Map UI platform label → crawl endpoint slug; default unknown → facebook.
-    const p = platform.toLowerCase();
-    let slug = "facebook";
-    if (p.includes("threads")) slug = "threads";
-    else if (p.includes("tiktok")) slug = "tiktok";
-    else if (p.includes("facebook")) slug = "facebook";
+    const slugFor = (label: string): string => {
+      const p = label.toLowerCase();
+      if (p.includes("threads")) return "threads";
+      if (p.includes("tiktok")) return "tiktok";
+      return "facebook";
+    };
 
-    try {
-      const response = await fetch(`/api/crawl/${slug}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform,
-          domain,
-          keywords: keywords || [],
-          extract_intents: false,
-          model: aiModel,
-          api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,
-        }),
-      });
+    // Crawl mọi nền tảng đã chọn SONG SONG; lỗi 1 platform không chặn các platform khác.
+    const perPlatform = await Promise.all(
+      platforms.map(async (label) => {
+        const slug = slugFor(label);
+        try {
+          const response = await fetch(`/api/crawl/${slug}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              platform: label,
+              domain,
+              keywords: keywords || [],
+              max_posts: maxPosts ?? 2,
+              extract_intents: false,
+              model: aiModel,
+              api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,
+            }),
+          });
 
-      const result = await response.json();
-      if (!response.ok || result.error) {
-        throw new Error(result.detail || result.error || "Social crawl failed.");
-      }
+          const result = await response.json();
+          if (!response.ok || result.error) {
+            throw new Error(result.detail || result.error || "Social crawl failed.");
+          }
 
-      const crawlPosts: any[] = result.crawl_posts || [];
-      if (crawlPosts.length > 0) {
-        showToast(`Crawled ${platform} → ${crawlPosts.length} posts collected!`, "success");
-      } else {
-        showToast(`Crawl finished for ${platform} but no posts were returned.`, "info");
-      }
+          const crawlPosts: any[] = result.crawl_posts || [];
+          return { label, crawlPosts, crawlLogs: (result.crawl_logs ?? []) as string[] };
+        } catch (err: any) {
+          console.error(err);
+          showToast(`${label}: ${err.message || "Social crawl failed."}`, "error");
+          return { label, crawlPosts: [] as any[], crawlLogs: [String(err.message || err)] };
+        }
+      }),
+    );
 
-      return { crawlPosts, crawlLogs: result.crawl_logs ?? [] };
-    } catch (err: any) {
-      console.error(err);
-      showToast(err.message || "Social crawl failed.", "error");
-      return { crawlPosts: [], crawlLogs: [String(err.message || err)] };
+    const crawlPosts = perPlatform.flatMap((r) => r.crawlPosts);
+    const crawlLogs = perPlatform.flatMap((r) => r.crawlLogs);
+    const okPlatforms = perPlatform.filter((r) => r.crawlPosts.length > 0).length;
+    if (crawlPosts.length > 0) {
+      showToast(
+        `Crawled ${crawlPosts.length} posts from ${okPlatforms}/${platforms.length} platform(s)!`,
+        "success",
+      );
+    } else {
+      showToast("Crawl finished but no posts were returned.", "info");
     }
+
+    return { crawlPosts, crawlLogs };
   };
 
   // Step 2: Curation Matrix edits

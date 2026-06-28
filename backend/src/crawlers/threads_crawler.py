@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 # Actor IDs (Apify Store)
 # ---------------------------------------------------------------------------
 AUTOCOMPLETE_ACTOR = "dainins/google-autocomplete-scraper"
-SEARCH_SCRAPER= "igview-owner/threads-search-scraper"
+# SEARCH_SCRAPER= "igview-owner/threads-search-scraper"
+SEARCH_SCRAPER= "watcher.data/search-threads-by-keywords"
 POSTS_ACTOR= "logical_scrapers/threads-post-scraper"
 
 class ThreadsCrawler(BaseCrawler):
@@ -29,11 +30,13 @@ class ThreadsCrawler(BaseCrawler):
         autocomplete_limit: int = 5,
         search_limit: int = 20,
         posts_limit: int = 20,
+        max_posts: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
         self.search_limit = search_limit
         self.posts_limit = posts_limit
+        self.max_posts = max_posts
 
     # ==================================================================
     # Step 1 — Google Autocomplete
@@ -88,7 +91,8 @@ class ThreadsCrawler(BaseCrawler):
         """
         Tìm kiếm các bài viết Threads bằng query.
         """
-        limit = limit or self.search_limit
+        # Fetch đúng max_posts/keyword (không over-fetch) — cap tổng vẫn ở _format_output.
+        limit = limit or self.max_posts
         run_input: dict[str, Any] = {
             "searchQuery": query,
             "maxItems": limit,
@@ -116,7 +120,7 @@ class ThreadsCrawler(BaseCrawler):
         start_urls = [{"url": u} for u in urls]
         run_input: dict[str, Any] = {
             "startUrls": start_urls,
-            "resultsLimit": self.posts_limit,
+            "resultsLimit": self.max_posts,
         }
         try:
             items = await self._run_actor(POSTS_ACTOR, run_input)
@@ -136,6 +140,9 @@ class ThreadsCrawler(BaseCrawler):
         """
         all_posts: list[dict[str, Any]] = []
         for keyword in keywords:
+            # Đủ post HỢP LỆ (sau dedup + lọc) → dừng; chưa đủ thì sang keyword kế bù.
+            if len(self._clean_posts(all_posts)) >= self.max_posts:
+                break
             logger.info("=" * 60)
             logger.info("Processing Threads keyword: '%s'", keyword)
             
@@ -166,6 +173,8 @@ class ThreadsCrawler(BaseCrawler):
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
+            # Chỉ scrape tối đa max_posts URL/keyword để bớt gọi actor scrape.
+            urls = urls[: self.max_posts]
             # ---- Step 3: Deep scrape posts ----
             if urls:
                 scraped = await self.scrape_posts(urls)
@@ -252,17 +261,14 @@ class ThreadsCrawler(BaseCrawler):
             author = author.get("username") or author.get("name") or ""
         return str(author).strip()
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
-        """
-        Format list posts thành JSON string cho IntentAgent.
-        """
-        import json
+    def _clean_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dedup theo URL + bỏ post không text + map field. KHÔNG slice/serialize."""
         if not posts:
-            return "[]"
-            
+            return []
+
         cleaned_posts = []
         seen_urls: set[str] = set()
-        
+
         for post in posts:
             url = self._extract_url(post)
             text = self._extract_text(post)
@@ -287,5 +293,11 @@ class ThreadsCrawler(BaseCrawler):
                 "postUrl": url,
                 "comments": comments[:3]
             })
-            
-        return json.dumps(cleaned_posts, ensure_ascii=False, indent=2)
+
+        return cleaned_posts
+
+    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+        """Format list posts thành JSON string cho IntentAgent (cap tổng max_posts)."""
+        import json
+        cleaned = self._clean_posts(posts)[: self.max_posts]
+        return json.dumps(cleaned, ensure_ascii=False, indent=2)

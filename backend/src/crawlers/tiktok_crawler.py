@@ -23,15 +23,18 @@ class TiktokCrawler(BaseCrawler):
         self,
         apify_token: str,
         search_limit: int = 20,
+        max_posts: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.search_limit = search_limit
+        self.max_posts = max_posts
 
     async def search_posts(self, query: str) -> list[dict[str, Any]]:
+        # Fetch đúng max_posts/keyword (không over-fetch) — cap tổng vẫn ở _format_output.
         run_input: dict[str, Any] = {
             "searchQueries": [query],
-            "resultsPerPage": self.search_limit,
-            "maxProfilesPerQuery": self.search_limit,
+            "resultsPerPage": self.max_posts,
+            "maxProfilesPerQuery": self.max_posts,
         }
         try:
             items = await self._run_actor(SEARCH_ACTOR, run_input)
@@ -91,6 +94,9 @@ class TiktokCrawler(BaseCrawler):
     async def run(self, keywords: list[str]) -> str:
         all_posts: list[dict[str, Any]] = []
         for keyword in keywords:
+            # Đủ post HỢP LỆ (sau dedup + lọc) → dừng; chưa đủ thì sang keyword kế bù.
+            if len(self._clean_posts(all_posts)) >= self.max_posts:
+                break
             logger.info("=" * 60)
             logger.info("Processing TikTok keyword: '%s'", keyword)
 
@@ -153,9 +159,10 @@ class TiktokCrawler(BaseCrawler):
             return stats
         return p
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+    def _clean_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dedup theo URL + bỏ post không text + map field. KHÔNG slice/serialize."""
         if not posts:
-            return "[]"
+            return []
 
         cleaned_posts = []
         seen_urls: set[str] = set()
@@ -206,4 +213,9 @@ class TiktokCrawler(BaseCrawler):
                 len(posts),
             )
 
-        return json.dumps(cleaned_posts, ensure_ascii=False, indent=2)
+        return cleaned_posts
+
+    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+        # Cap tổng số post mỗi nền tảng (sau dedup + lọc post-không-text).
+        cleaned = self._clean_posts(posts)[: self.max_posts]
+        return json.dumps(cleaned, ensure_ascii=False, indent=2)

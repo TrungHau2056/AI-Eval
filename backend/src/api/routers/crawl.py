@@ -117,6 +117,7 @@ class FacebookCrawlRequest(BaseModel):
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
     search_limit: int = Field(default=20, ge=1, le=50)
     posts_limit: int = Field(default=20, ge=1, le=50)
+    max_posts: int = Field(default=2, ge=1, le=50, description="Cap tổng số post mỗi nền tảng")
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
@@ -144,6 +145,7 @@ class ThreadsCrawlRequest(BaseModel):
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
     search_limit: int = Field(default=20, ge=1, le=50)
     posts_limit: int = Field(default=20, ge=1, le=50)
+    max_posts: int = Field(default=2, ge=1, le=50, description="Cap tổng số post mỗi nền tảng")
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
@@ -170,6 +172,7 @@ class TiktokCrawlRequest(BaseModel):
     keywords: list[str] = Field(..., min_length=1, description="Danh sách keywords cần crawl")
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
     search_limit: int = Field(default=20, ge=1, le=50)
+    max_posts: int = Field(default=2, ge=1, le=50, description="Cap tổng số post mỗi nền tảng")
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
     # Crawl-only by default; intents come from /api/discover. Set True for legacy behavior.
@@ -210,6 +213,7 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             autocomplete_limit=req.autocomplete_limit,
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
+            max_posts=req.max_posts,
         )
         raw_content = await crawler.run(keywords=req.keywords)
     except Exception as exc:
@@ -224,7 +228,9 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             error=f"Crawl error: {exc}",
         )
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
+    # Key theo slug cố định của endpoint (không dùng req.platform vì FE gửi label tự do)
+    # → crawl nhiều nền tảng tích luỹ, không ghi đè nhau.
+    get_state().raw_social_content["facebook"] = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
@@ -266,6 +272,7 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             autocomplete_limit=req.autocomplete_limit,
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
+            max_posts=req.max_posts,
         )
         raw_content = await crawler.run(keywords=req.keywords)
     except Exception as exc:
@@ -280,7 +287,8 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             error=f"Crawl error: {exc}",
         )
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
+    # Key theo slug cố định của endpoint → crawl nhiều nền tảng tích luỹ, không ghi đè nhau.
+    get_state().raw_social_content["threads"] = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(
@@ -322,6 +330,7 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
         crawler = TiktokCrawler(
             apify_token=token,
             search_limit=req.search_limit,
+            max_posts=req.max_posts,
         )
         raw_content = await crawler.run(keywords=req.keywords)
     except Exception as exc:
@@ -337,7 +346,8 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
         )
     
     # ---- Store crawled content for later /api/discover; optionally mine intents now ----
-    get_state().raw_social_content = raw_content
+    # Key theo slug cố định của endpoint → crawl nhiều nền tảng tích luỹ, không ghi đè nhau.
+    get_state().raw_social_content["tiktok"] = raw_content
     crawl_posts = _parse_posts(raw_content, req.platform)
     if req.extract_intents:
         intents, crawl_logs = await _mine_and_store(

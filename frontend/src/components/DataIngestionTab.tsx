@@ -13,9 +13,10 @@ interface DataIngestionTabProps {
     prdFile: File | null,
   ) => Promise<IngestStats>;
   onCrawlSocial?: (
-    platform: string,
+    platforms: string[],
     domain: string,
     keywords?: string[],
+    maxPosts?: number,
   ) => Promise<{ crawlPosts: any[]; crawlLogs: string[] }>;
   ruleText: string;
   onOpenRuleModal: () => void;
@@ -98,6 +99,8 @@ export default function DataIngestionTab({
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeywordInput, setNewKeywordInput] = useState("");
   const [isViral, setIsViral] = useState(false);
+  // Cap tổng số post crawl mỗi nền tảng (bất kể số keyword). Trần backend = 50.
+  const [maxPostsPerPlatform, setMaxPostsPerPlatform] = useState(2);
 
   // Toggle a platform in the multi-select list.
   const handleTogglePlatform = (p: string) => {
@@ -214,25 +217,28 @@ export default function DataIngestionTab({
     const finalDomain = isCustomDomain ? (customDomainLabel.trim() || "Lĩnh vực Tùy chỉnh") : (PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label || "Du lịch");
 
     try {
-      const result = await onCrawlSocial(finalPlatform, finalDomain, keywords);
+      const result = await onCrawlSocial(activeList, finalDomain, keywords, maxPostsPerPlatform);
       let postsToSave: any[] = result?.crawlPosts ? [...result.crawlPosts] : [];
 
-      // Demo fallback when the crawler returns nothing (e.g. no Apify token): build a
-      // few placeholder rows from the keywords so the sheet isn't blank in demo mode.
+      // Demo fallback when the crawler returns nothing (e.g. no Apify token): build
+      // placeholder rows so the sheet isn't blank. Respect the per-platform cap:
+      // up to maxPostsPerPlatform rows for EACH selected platform.
       if (postsToSave.length === 0) {
         const dates = ["2026-06-25", "2026-06-24", "2026-06-23", "2026-06-22", "2026-06-20"];
         const sampleTexts = keywords.length > 0 ? keywords : ["#feedback", "#support", "#issue"];
-        postsToSave = sampleTexts.map((kw: string, index: number) => {
-          const postPlatform = activeList[index % activeList.length] || "Facebook";
-          return {
-            platform: postPlatform,
-            url: `https://www.${postPlatform.toLowerCase().replace(/\s+/g, "")}.com/groups/${finalDomain.toLowerCase().replace(/\s+/g, "")}/posts/demo_${index}`,
-            postingDate: dates[index % dates.length],
-            text: `Thảo luận mẫu liên quan đến ${kw} trên ${postPlatform}.`,
-            likes: Math.floor(Math.random() * 500) + 50,
-            commentsCount: Math.floor(Math.random() * 150) + 10,
-          };
-        });
+        postsToSave = activeList.flatMap((postPlatform) =>
+          Array.from({ length: maxPostsPerPlatform }, (_, i) => {
+            const kw = sampleTexts[i % sampleTexts.length];
+            return {
+              platform: postPlatform,
+              url: `https://www.${postPlatform.toLowerCase().replace(/\s+/g, "")}.com/groups/${finalDomain.toLowerCase().replace(/\s+/g, "")}/posts/demo_${i}`,
+              postingDate: dates[i % dates.length],
+              text: `Thảo luận mẫu liên quan đến ${kw} trên ${postPlatform}.`,
+              likes: Math.floor(Math.random() * 500) + 50,
+              commentsCount: Math.floor(Math.random() * 150) + 10,
+            };
+          }),
+        );
       }
 
       setCrawledPosts(postsToSave);
@@ -653,6 +659,28 @@ export default function DataIngestionTab({
                     <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isViral ? "translate-x-5" : "translate-x-0"}`} />
                   </div>
                 </button>
+              </div>
+
+              {/* Max posts per platform */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">
+                  Posts per platform
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={maxPostsPerPlatform}
+                  onChange={(e) =>
+                    setMaxPostsPerPlatform(
+                      Math.max(1, Math.min(50, Number(e.target.value) || 1)),
+                    )
+                  }
+                  className="px-4 py-3 border border-stone-200 bg-white text-stone-700 text-[12px] font-mono focus:border-[#ff4d00] focus:outline-none w-full"
+                />
+                <p className="text-[9.5px] text-stone-400 font-serif italic">
+                  Limit total posts per platform (1–50), regardless of the number of keywords.
+                </p>
               </div>
             </div>
           </div>

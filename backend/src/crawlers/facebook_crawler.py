@@ -28,11 +28,13 @@ class FacebookCrawler(BaseCrawler):
         autocomplete_limit: int = 5,
         search_limit: int = 20,
         posts_limit: int = 20,
+        max_posts: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
         self.search_limit = search_limit
         self.posts_limit = posts_limit
+        self.max_posts = max_posts
 
     async def get_autocomplete(
         self,
@@ -85,7 +87,8 @@ class FacebookCrawler(BaseCrawler):
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Tìm bài viết Facebook qua scraper_one/facebook-posts-search."""
-        limit = limit or self.search_limit
+        # Fetch đúng max_posts/keyword (không over-fetch) — cap tổng vẫn ở _format_output.
+        limit = limit or self.max_posts
         run_input: dict[str, Any] = {
             "query": query,
             "resultsCount": limit,
@@ -108,7 +111,7 @@ class FacebookCrawler(BaseCrawler):
             return []
         run_input: dict[str, Any] = {
             "startUrls": [{"url": u} for u in urls],
-            "resultsLimit": self.posts_limit,
+            "resultsLimit": self.max_posts,
         }
         try:
             items = await self._run_actor(POSTS_ACTOR, run_input)
@@ -150,6 +153,9 @@ class FacebookCrawler(BaseCrawler):
         """
         all_posts: list[dict[str, Any]] = []
         for keyword in keywords:
+            # Đủ post HỢP LỆ (sau dedup + lọc) → dừng; chưa đủ thì sang keyword kế bù.
+            if len(self._clean_posts(all_posts)) >= self.max_posts:
+                break
             logger.info("=" * 60)
             logger.info("Processing keyword: '%s'", keyword)
             queries = [keyword]
@@ -167,6 +173,8 @@ class FacebookCrawler(BaseCrawler):
                 if url and url.startswith("http") and url not in urls:
                     urls.append(url)
 
+            # Chỉ scrape tối đa max_posts URL/keyword để bớt gọi actor scrape.
+            urls = urls[: self.max_posts]
             if urls:
                 scraped = await self.scrape_posts(urls)
                 if scraped:
@@ -258,9 +266,10 @@ class FacebookCrawler(BaseCrawler):
                 return int(val)
         return 0
 
-    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+    def _clean_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dedup theo URL + bỏ post không text + map field. KHÔNG slice/serialize."""
         if not posts:
-            return "[]"
+            return []
 
         cleaned_posts = []
         seen_urls: set[str] = set()
@@ -295,4 +304,9 @@ class FacebookCrawler(BaseCrawler):
                 len(posts),
             )
 
-        return json.dumps(cleaned_posts, ensure_ascii=False, indent=2)
+        return cleaned_posts
+
+    def _format_output(self, posts: list[dict[str, Any]]) -> str:
+        # Cap tổng số post mỗi nền tảng (sau dedup + lọc post-không-text).
+        cleaned = self._clean_posts(posts)[: self.max_posts]
+        return json.dumps(cleaned, ensure_ascii=False, indent=2)

@@ -326,8 +326,9 @@ def discover_intents(req: DiscoverRequest):
         parts.append(req.logsText)
     elif state.raw_input and state.raw_input.content:
         parts.append(state.raw_input.content)
-    if state.raw_social_content and state.raw_social_content.strip():
-        parts.append(state.raw_social_content)
+    for content in state.raw_social_content.values():
+        if content and content.strip():
+            parts.append(content)
     data_content = "\n\n".join(p for p in parts if p and p.strip())
 
     prd_content = state.raw_prd_content
