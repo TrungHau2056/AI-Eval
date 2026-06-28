@@ -33,7 +33,7 @@ class TiktokCrawler(BaseCrawler):
     def __init__(
         self,
         apify_token: str,
-        search_limit: int = 20,
+        search_limit: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.search_limit = search_limit

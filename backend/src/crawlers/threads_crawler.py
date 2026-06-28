@@ -27,8 +27,8 @@ class ThreadsCrawler(BaseCrawler):
         self,
         apify_token: str,
         autocomplete_limit: int = 5,
-        search_limit: int = 20,
-        posts_limit: int = 20,
+        search_limit: int = 2,
+        posts_limit: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
@@ -199,8 +199,8 @@ class ThreadsCrawler(BaseCrawler):
             logger.info("Falling back to Threads search results for keyword '%s'.", keyword)
             all_posts.extend(search_results)
 
-        # ---- Format output (giới hạn đúng posts_limit bài) ----
-        return self._format_output(all_posts, limit=self.posts_limit)
+        # ---- Format output (hiển thị hết bài đã crawl, không trim tổng) ----
+        return self._format_output(all_posts)
 
     # ==================================================================
     # Format helpers

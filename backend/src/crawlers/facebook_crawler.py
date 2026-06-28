@@ -32,8 +32,8 @@ class FacebookCrawler(BaseCrawler):
         self,
         apify_token: str,
         autocomplete_limit: int = 5,
-        search_limit: int = 20,
-        posts_limit: int = 20,
+        search_limit: int = 2,
+        posts_limit: int = 2,
     ) -> None:
         super().__init__(apify_token)
         self.autocomplete_limit = autocomplete_limit
@@ -244,7 +244,7 @@ class FacebookCrawler(BaseCrawler):
             logger.info("Falling back to search results for keyword '%s'.", keyword)
             all_posts.extend(search_results)
 
-        return self._format_output(all_posts, limit=self.posts_limit)
+        return self._format_output(all_posts)
 
     def _filter_usable_posts(self, posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Bỏ item lỗi / không có text (vd. apify/facebook-posts-scraper trả error object)."""

@@ -16,6 +16,7 @@ interface DataIngestionTabProps {
     platform: string,
     domain: string,
     keywords?: string[],
+    postsPerKeyword?: number,
   ) => Promise<{ crawlPosts: any[]; newCrawlPosts: any[]; crawlLogs: string[] }>;
   ruleText: string;
   onOpenRuleModal: () => void;
@@ -114,6 +115,8 @@ export default function DataIngestionTab({
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeywordInput, setNewKeywordInput] = useState("");
   const [isViral, setIsViral] = useState(false);
+  // Posts to crawl per keyword (shared across all platforms). No default — user must enter.
+  const [postsPerKeyword, setPostsPerKeyword] = useState<string>("");
 
   // Toggle a platform in the multi-select list.
   const handleTogglePlatform = (p: string) => {
@@ -237,6 +240,13 @@ export default function DataIngestionTab({
       return;
     }
 
+    // Require an explicit posts-per-keyword count (no default).
+    const perKeyword = parseInt(postsPerKeyword, 10);
+    if (!perKeyword || perKeyword < 1) {
+      alert("Nhập số posts muốn crawl mỗi keyword (>= 1).");
+      return;
+    }
+
     setSocialLoading(true);
 
     const finalDomain = isCustomDomain ? (customDomainLabel.trim() || "Lĩnh vực Tùy chỉnh") : (PRESET_DOMAINS.find(d => d.id === selectedDomainId)?.label || "Du lịch");
@@ -247,7 +257,7 @@ export default function DataIngestionTab({
 
     try {
       for (const platform of activeList) {
-        const result = await onCrawlSocial(platform, finalDomain, normalizedKeywords);
+        const result = await onCrawlSocial(platform, finalDomain, normalizedKeywords, perKeyword);
         if (result?.crawlPosts?.length) {
           mergedPosts = result.crawlPosts;
         }
@@ -288,6 +298,27 @@ export default function DataIngestionTab({
   // Remove keyword tag
   const handleRemoveKeyword = (indexToRemove: number) => {
     setKeywords(keywords.filter((_, i) => i !== indexToRemove));
+  };
+
+  // Delete a single crawled post (by sheet index) from backend store + local sheet.
+  const handleDeletePost = async (idx: number) => {
+    try {
+      const res = await fetch("/api/crawl/posts/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ indices: [idx] }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.detail || data.error || "Delete failed.");
+      }
+      const posts: any[] = data.posts || [];
+      setCrawledPosts(posts);
+      setSocialResultsText(posts.length > 0 ? `${posts.length} posts in sheet.` : "");
+    } catch (err) {
+      console.error("Failed to delete crawled post:", err);
+      alert("Không xóa được dòng này. Vui lòng thử lại.");
+    }
   };
 
   // Reset keywords to preset defaults
@@ -591,6 +622,23 @@ export default function DataIngestionTab({
                 </div>
               </div>
 
+              {/* Posts per keyword (shared across all platforms) */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between items-center">
+                  <span>Posts mỗi keyword (mọi nền tảng)</span>
+                  <span className="font-mono text-[9px] text-stone-400 normal-case tracking-normal">áp dụng cho từng keyword</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={postsPerKeyword}
+                  onChange={(e) => setPostsPerKeyword(e.target.value)}
+                  placeholder="Nhập số posts muốn crawl mỗi keyword (vd. 2)"
+                  className="w-full bg-white border border-stone-200 px-4 py-3 text-[11px] font-mono focus:border-[#ff4d00] focus:ring-1 focus:ring-[#ff4d00] outline-none"
+                />
+              </div>
+
               {/* Keywords manager */}
               <div className="flex flex-col gap-2 p-4 bg-white border border-stone-200">
                 <div className="flex items-center justify-between border-b border-stone-100 pb-2">
@@ -805,7 +853,7 @@ export default function DataIngestionTab({
                   <p className="text-xs font-mono uppercase tracking-wider">No crawled data available.</p>
                 </div>
               ) : (
-                <div className="border border-stone-200 bg-white overflow-hidden shadow-xs">
+                <div className="border border-stone-200 bg-white overflow-x-auto shadow-xs">
                   <table className="w-full text-left border-collapse text-[11px] leading-normal">
                     <thead>
                       <tr className="bg-stone-100/80 border-b border-stone-200 text-[10px] font-mono uppercase font-bold text-stone-600">
@@ -813,7 +861,8 @@ export default function DataIngestionTab({
                         <th className="px-4 py-3 border-r border-stone-200">Source URL</th>
                         <th className="px-4 py-3 border-r border-stone-200">Posting Date</th>
                         <th className="px-4 py-3 border-r border-stone-200 text-center">Engagement</th>
-                        <th className="px-4 py-3">Discussion Content</th>
+                        <th className="px-4 py-3 border-r border-stone-200">Discussion Content</th>
+                        <th className="px-4 py-3 text-center sticky right-0 bg-stone-100 z-20 border-l border-stone-200">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200">
@@ -885,8 +934,22 @@ export default function DataIngestionTab({
                             </td>
 
                             {/* Content text */}
-                            <td className="px-4 py-3 text-stone-700 font-sans max-w-[320px] truncate" title={post.text}>
+                            <td className="px-4 py-3 text-stone-700 font-sans max-w-[320px] truncate border-r border-stone-200" title={post.text}>
                               {post.text || <span className="text-stone-400 italic">No text content</span>}
+                            </td>
+
+                            {/* Delete action */}
+                            <td className="px-4 py-3 text-center whitespace-nowrap sticky right-0 bg-white z-10 border-l border-stone-200">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm("Xóa kết quả này khỏi sheet?")) handleDeletePost(idx);
+                                }}
+                                className="text-stone-400 hover:text-rose-600 hover:bg-rose-50 p-1 rounded-sm transition-colors cursor-pointer border-0 bg-transparent"
+                                title="Xóa dòng này"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">close</span>
+                              </button>
                             </td>
                           </tr>
                         );

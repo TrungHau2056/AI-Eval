@@ -192,6 +192,7 @@ export default function App() {
     platform: string,
     domain: string,
     keywords?: string[],
+    postsPerKeyword?: number,
   ): Promise<{ crawlPosts: any[]; newCrawlPosts: any[]; crawlLogs: string[] }> => {
     const slug = platformToSlug(platform);
 
@@ -203,6 +204,8 @@ export default function App() {
           platform,
           domain,
           keywords: keywords || [],
+          search_limit: postsPerKeyword,
+          posts_limit: postsPerKeyword,
           extract_intents: false,
           model: aiModel,
           api_key: apiKey && apiKey !== "••••••••••••••••" ? apiKey : undefined,

@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from src.crawlers.facebook_crawler import FacebookCrawler
 from src.crawlers.threads_crawler import ThreadsCrawler
 from src.crawlers.tiktok_crawler import TiktokCrawler
-from src.crawlers.crawl_store import clear_posts, load_posts
-from src.crawlers.crawl_persist import persist_crawl_posts
+from src.crawlers.crawl_store import clear_posts, load_posts, save_posts
+from src.crawlers.crawl_persist import persist_crawl_posts, sync_social_content_to_state
 from src.config import settings
 from src.api.deps import get_state
 from src.api.routers.frontend_api import (
@@ -117,8 +117,8 @@ class FacebookCrawlRequest(BaseModel):
     # Apify config — override từ request, fallback sang .env
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
-    search_limit: int = Field(default=20, ge=1, le=50)
-    posts_limit: int = Field(default=20, ge=1, le=50)
+    search_limit: int = Field(default=2, ge=1, le=50)
+    posts_limit: int = Field(default=2, ge=1, le=50)
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
@@ -145,8 +145,8 @@ class ThreadsCrawlRequest(BaseModel):
     # Apify config — override từ request, fallback sang .env
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
     autocomplete_limit: int = Field(default=5, ge=1, le=20)
-    search_limit: int = Field(default=20, ge=1, le=50)
-    posts_limit: int = Field(default=20, ge=1, le=50)
+    search_limit: int = Field(default=2, ge=1, le=50)
+    posts_limit: int = Field(default=2, ge=1, le=50)
     # LLM config — cho IntentAgent
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
@@ -173,7 +173,7 @@ class TiktokCrawlRequest(BaseModel):
     domain: str = Field(default="", description="Business domain / ngành hàng")
     keywords: list[str] = Field(..., min_length=1, description="Danh sách keywords cần crawl")
     apify_token: Optional[str] = Field(default=None, description="Apify API token")
-    search_limit: int = Field(default=20, ge=1, le=50)
+    search_limit: int = Field(default=2, ge=1, le=50)
     model: Optional[str] = Field(default=None, description="LLM model name")
     api_key: Optional[str] = Field(default=None, description="LLM API key")
     # Crawl-only by default; intents come from /api/discover. Set True for legacy behavior.
@@ -375,6 +375,22 @@ async def reset_crawl_posts():
     clear_posts()
     get_state().raw_social_content = ""
     return {"success": True, "posts": [], "count": 0}
+
+
+class DeletePostsRequest(BaseModel):
+    """Indices (vào sheet hiện tại) của các post cần xóa."""
+    indices: list[int] = Field(..., min_length=1, description="Vị trí post cần xóa khỏi sheet")
+
+
+@router.post("/posts/delete")
+async def delete_crawl_posts(req: DeletePostsRequest):
+    """Remove selected posts (by index) from the persisted sheet + resync social content."""
+    posts = load_posts()
+    drop = {i for i in req.indices if 0 <= i < len(posts)}
+    remaining = [p for i, p in enumerate(posts) if i not in drop]
+    save_posts(remaining)
+    sync_social_content_to_state()
+    return {"success": True, "posts": remaining, "count": len(remaining)}
 
 
 @router.get("/health")
