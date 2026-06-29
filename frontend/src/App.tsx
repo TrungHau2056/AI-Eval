@@ -117,16 +117,14 @@ export default function App() {
     showToast(`Diagnostic model hot-swapped to: ${val}`, "info");
   };
 
-  // Step 1a: Ingest multi-source files (server-side FormData → /api/ingest)
+  // Step 1a: Ingest files (server-side FormData → /api/ingest). Loader chọn theo
+  // đuôi file ở backend — không gửi kèm loại nguồn.
   const handleIngest = async (
-    files: { file: File; sourceType: string }[],
+    files: File[],
     prdFile: File | null,
   ): Promise<IngestStats> => {
     const fd = new FormData();
-    files.forEach(({ file, sourceType }) => {
-      fd.append("files", file);
-      fd.append("types", sourceType);
-    });
+    files.forEach((file) => fd.append("files", file));
     if (prdFile) fd.append("prd_file", prdFile);
 
     const response = await fetch("/api/ingest", { method: "POST", body: fd });

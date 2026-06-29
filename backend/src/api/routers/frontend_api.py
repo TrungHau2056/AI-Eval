@@ -1,10 +1,10 @@
 import asyncio
 import io
-import json
 import logging
+import os
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.api.deps import get_memory, get_state, reset_state
@@ -235,12 +235,12 @@ def update_state(body: StateUpdateRequest):
 @router.post("/api/ingest")
 async def ingest_sources(
     files: list[UploadFile] = File(default=[]),
-    types: list[str] = Form(default=[]),
     prd_file: UploadFile | None = File(default=None),
 ):
     """Nạp nhiều file đa nguồn → merge data thật vào state.raw_input + tách PRD.
 
-    files[i] ↔ types[i] (song song). File type=prd (hoặc prd_file) → PRDLoader.
+    Loader chọn THUẦN theo đuôi file (.csv/.xlsx/.json/.md/.txt) — user không cần
+    chọn loại nguồn. PRD đi qua field `prd_file` riêng (nút Upload PRD).
     Per-file graceful skip: lỗi/0 dòng → status "skipped" + warning, không fail cả mẻ.
     """
     logger.info("POST /api/ingest | files=%d | prd_file=%s", len(files), bool(prd_file))
@@ -252,18 +252,9 @@ async def ingest_sources(
 
     for idx, uf in enumerate(files):
         filename = uf.filename or f"file_{idx}"
-        source_type = types[idx].lower() if idx < len(types) and types[idx] else None
         raw_bytes = await uf.read()
         try:
-            if source_type == "prd":
-                ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
-                state.raw_prd_content = ri.content
-                prd_loaded = True
-                sources.append({"source_type": "prd", "filename": filename,
-                                "rows_in": 0, "rows_after_dedup": 0, "status": "ok"})
-                continue
-            loader = get_loader(source_type=source_type, filename=filename,
-                                uploaded_file=io.BytesIO(raw_bytes))
+            loader = get_loader(filename=filename, uploaded_file=io.BytesIO(raw_bytes))
             ri = loader.load()
             rows_in = ri.metadata.get("rows", ri.content.count("\n---\n") + 1)
             data_inputs.append(ri)
@@ -272,7 +263,8 @@ async def ingest_sources(
         except Exception as e:
             logger.warning("Ingest skip %s: %s", filename, e)
             warnings.append(f"{filename}: {e} → skip")
-            sources.append({"source_type": source_type or "?", "filename": filename,
+            ext = os.path.splitext(filename)[1].lstrip(".").lower() or "?"
+            sources.append({"source_type": ext, "filename": filename,
                             "rows_in": 0, "rows_after_dedup": 0, "status": "skipped"})
 
     if prd_file is not None:

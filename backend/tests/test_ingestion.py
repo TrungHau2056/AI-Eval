@@ -8,7 +8,7 @@ import pytest
 from src.ingestion.excel_loader import ExcelLoader
 from src.ingestion.json_loader import JsonLoader
 from src.ingestion.loader_factory import get_loader
-from src.ingestion.markdown_loader import MarkdownLoader, strip_markdown
+from src.ingestion.markdown_loader import MarkdownLoader
 from src.ingestion.normalizer import merge_sources, normalize
 from src.ingestion.prd_loader import PRDLoader
 from src.ingestion.social_loader import SocialLoader
@@ -47,10 +47,10 @@ def test_json_loader_corrupt_raises():
         JsonLoader(_open("sample_corrupt.json"), "sample_corrupt.json").load()
 
 
-def test_markdown_loader_strips_syntax():
-    assert strip_markdown("# Tiêu đề\n- **bold** item") == "Tiêu đề\nbold item"
+def test_markdown_loader_keeps_raw():
+    # Giữ NGUYÊN VĂN: ký hiệu markdown không bị strip.
     result = MarkdownLoader(_open("sample_prd.md"), "sample_prd.md").load()
-    assert "#" not in result.content
+    assert "#" in result.content
     assert "Đặt lịch lái thử" in result.content
 
 
@@ -92,7 +92,7 @@ def test_prd_loader_content():
     ri = PRDLoader(_open("sample_prd.md"), "sample_prd.md").load()
     assert ri.source_type == "prd"
     assert "Đặt lịch lái thử" in ri.content
-    assert "#" not in ri.content  # đã strip cú pháp markdown
+    assert "#" in ri.content  # giữ nguyên văn markdown (không strip)
 
 
 # ---------- Normalizer ----------

@@ -4,8 +4,12 @@ import json
 from src.ingestion.base import DataIngestion
 from src.models.schemas import RawInput
 
-# Whitelist key chứa text hữu ích (case-insensitive)
-TEXT_KEYS = {"text", "content", "comment", "message", "body", "caption", "title"}
+# Whitelist key chứa text hữu ích (case-insensitive). Gồm cả key kiểu Apify
+# (commentText/caption/description) để file social export tự upload vẫn bóc được text.
+TEXT_KEYS = {
+    "text", "content", "comment", "commenttext", "message", "body",
+    "caption", "title", "description",
+}
 
 
 def _extract_utterances(node, out: list[str]) -> None:

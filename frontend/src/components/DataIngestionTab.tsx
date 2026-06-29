@@ -1,17 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { IngestStats } from "../types";
 
-interface StagedFile {
-  file: File;
-  sourceType: string;
-}
-
 interface DataIngestionTabProps {
   onDiscover: (text: string, ruleText?: string) => Promise<void>;
-  onIngest: (
-    files: { file: File; sourceType: string }[],
-    prdFile: File | null,
-  ) => Promise<IngestStats>;
+  onIngest: (files: File[], prdFile: File | null) => Promise<IngestStats>;
   onCrawlSocial?: (
     platform: string,
     domain: string,
@@ -22,8 +14,6 @@ interface DataIngestionTabProps {
   onOpenRuleModal: () => void;
   onProceedToCuration?: () => void;
 }
-
-const SOURCE_OPTIONS = ["survey", "social", "text"];
 
 // Selectable social platforms (multi-select checkboxes).
 const PLATFORMS = ["Facebook", "Threads", "TikTok"];
@@ -96,7 +86,7 @@ export default function DataIngestionTab({
   const [logsText, setLogsText] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [prdFile, setPrdFile] = useState<File | null>(null);
   const [stats, setStats] = useState<IngestStats | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -155,18 +145,8 @@ export default function DataIngestionTab({
   }, [selectedDomainId, isCustomDomain]);
 
   // ---- Ingest handlers ----
-  const inferSourceType = (name: string): string => {
-    const lower = name.toLowerCase();
-    if (lower.endsWith(".md") || lower.endsWith(".txt")) return "text";
-    return "survey";
-  };
-
   const addFiles = (files: FileList) => {
-    const next: StagedFile[] = Array.from(files).map((file) => ({
-      file,
-      sourceType: inferSourceType(file.name),
-    }));
-    setStagedFiles((prev) => [...prev, ...next]);
+    setStagedFiles((prev) => [...prev, ...Array.from(files)]);
     setStats(null);
   };
 
@@ -185,9 +165,6 @@ export default function DataIngestionTab({
     e.target.value = "";
   };
 
-  const setRowType = (idx: number, type: string) => {
-    setStagedFiles((prev) => prev.map((f, i) => (i === idx ? { ...f, sourceType: type } : f)));
-  };
   const removeRow = (idx: number) => {
     setStagedFiles((prev) => prev.filter((_, i) => i !== idx));
   };
@@ -380,7 +357,7 @@ export default function DataIngestionTab({
                   Input Sources
                 </h4>
                 <p className="text-[11px] text-stone-400 font-serif italic mt-1">
-                  Upload files (survey / social / text) + optional PRD, or paste raw text. At least one source is required.
+                  Upload files (.csv / .xlsx / .json / .md / .txt — định dạng tự nhận) + optional PRD, or paste raw text. At least one source is required.
                 </p>
               </div>
 
@@ -402,26 +379,15 @@ export default function DataIngestionTab({
                 <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">Supported: .csv, .xlsx, .json, .md, .txt</p>
               </div>
 
-              {/* Staged file list with per-file source dropdown */}
+              {/* Staged file list — định dạng tự nhận, không cần chọn loại nguồn */}
               {stagedFiles.length > 0 && (
                 <div className="border border-stone-200">
-                  {stagedFiles.map((sf, idx) => (
+                  {stagedFiles.map((file, idx) => (
                     <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 last:border-b-0">
-                      <span className="text-[12px] font-mono text-stone-700 truncate flex-1">{sf.file.name}</span>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <select
-                          value={sf.sourceType}
-                          onChange={(e) => setRowType(idx, e.target.value)}
-                          className="text-[11px] font-mono uppercase tracking-wider border border-stone-300 bg-white px-2 py-1 outline-none focus:border-[#ff4d00] cursor-pointer"
-                        >
-                          {SOURCE_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => removeRow(idx)} className="text-stone-400 hover:text-[#ff4d00] bg-transparent border-0 cursor-pointer" title="Remove">
-                          <span className="material-symbols-outlined text-[18px]">close</span>
-                        </button>
-                      </div>
+                      <span className="text-[12px] font-mono text-stone-700 truncate flex-1">{file.name}</span>
+                      <button onClick={() => removeRow(idx)} className="text-stone-400 hover:text-[#ff4d00] bg-transparent border-0 cursor-pointer shrink-0" title="Remove">
+                        <span className="material-symbols-outlined text-[18px]">close</span>
+                      </button>
                     </div>
                   ))}
                 </div>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Intent } from "../types";
 import AutoTextarea from "./AutoTextarea";
 import { downloadIntentsCsv, downloadIntentsJson } from "../utils/exportIntents";
@@ -52,8 +52,104 @@ export default function IntentCurationTab({
 
   const selectedCount = intents.filter((i) => i.selected).length;
   const hasCoverage = intents.some((i) => i.coverage);
-  const visibleIntents =
-    coverageFilter === "all" ? intents : intents.filter((i) => (i.coverage || "") === coverageFilter);
+
+  // Một dòng hiển thị: có thể gộp từ nhiều intent gốc (cặp Confirmed PRD+Data).
+  // Mỗi field editable route về đúng id intent gốc để sửa không bị lệch bản.
+  type DisplayRow = {
+    key: string;
+    memberIds: string[];
+    name: string;
+    utterance: string;
+    triggerMoment: string;
+    phase: string;
+    sourceLabel: string; // "prd" | "data" | "PRD+Data"
+    coverage: string;
+    selected: boolean;
+    nameId: string;
+    utteranceId: string;
+    momentId: string;
+    phaseId: string;
+  };
+
+  const displayRows = useMemo<DisplayRow[]>(() => {
+    const byId = new Map(intents.map((i) => [i.id, i]));
+    const consumed = new Set<string>();
+    const rows: DisplayRow[] = [];
+
+    const passthrough = (it: Intent): DisplayRow => ({
+      key: it.id,
+      memberIds: [it.id],
+      name: it.name,
+      utterance: it.utterance,
+      triggerMoment: it.triggerMoment,
+      phase: it.phase,
+      sourceLabel: it.source || "",
+      coverage: it.coverage || "",
+      selected: it.selected,
+      nameId: it.id,
+      utteranceId: it.id,
+      momentId: it.id,
+      phaseId: it.id,
+    });
+
+    for (const it of intents) {
+      if (consumed.has(it.id)) continue;
+
+      const isConfirmed = (it.coverage || "") === "confirmed" && (it.matchedIds?.length ?? 0) > 0;
+      if (!isConfirmed) {
+        rows.push(passthrough(it));
+        consumed.add(it.id);
+        continue;
+      }
+
+      // Gom cluster các intent confirmed nối nhau qua matchedIds (BFS transitively).
+      const cluster: Intent[] = [];
+      const queue = [it.id];
+      const seen = new Set<string>([it.id]);
+      while (queue.length) {
+        const cur = byId.get(queue.shift()!);
+        if (!cur) continue;
+        cluster.push(cur);
+        for (const mid of cur.matchedIds || []) {
+          if (!seen.has(mid) && byId.has(mid)) {
+            seen.add(mid);
+            queue.push(mid);
+          }
+        }
+      }
+      cluster.forEach((c) => consumed.add(c.id));
+
+      const prd = cluster.find((c) => c.source === "prd");
+      const data = cluster.find((c) => c.source === "data");
+
+      // Không đủ 2 nguồn → coi như dòng đơn (giữ nguồn của nó).
+      if (!prd || !data) {
+        rows.push(passthrough(it));
+        continue;
+      }
+
+      // Trộn: name/moment/phase từ PRD, utterance từ Data.
+      rows.push({
+        key: cluster.map((c) => c.id).join("+"),
+        memberIds: cluster.map((c) => c.id),
+        name: prd.name || data.name,
+        utterance: data.utterance || prd.utterance,
+        triggerMoment: prd.triggerMoment || data.triggerMoment,
+        phase: prd.phase || data.phase,
+        sourceLabel: "PRD+Data",
+        coverage: "confirmed",
+        selected: cluster.every((c) => c.selected),
+        nameId: prd.id,
+        utteranceId: data.id,
+        momentId: prd.id,
+        phaseId: prd.id,
+      });
+    }
+    return rows;
+  }, [intents]);
+
+  const visibleRows =
+    coverageFilter === "all" ? displayRows : displayRows.filter((r) => r.coverage === coverageFilter);
 
   const handleDownloadJson = () => {
     if (intents.length === 0) {
@@ -172,57 +268,61 @@ export default function IntentCurationTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 text-stone-700">
-            {visibleIntents.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-center py-12 text-stone-400 font-serif italic">
                   No matching curated intents found. Try clicking "Run Intent Discovery" on Step 1, or click "New Intent" to add some!
                 </td>
               </tr>
             ) : (
-              visibleIntents.map((item) => (
+              visibleRows.map((row) => (
                 <tr
-                  key={item.id}
+                  key={row.key}
                   className={`group transition-colors ${
-                    item.selected ? "bg-[#ff4d00]/[0.03]" : "hover:bg-stone-50/50"
+                    row.selected ? "bg-[#ff4d00]/[0.03]" : "hover:bg-stone-50/50"
                   }`}
                 >
                   <td className="px-6 py-4 text-center">
                     <input
                       type="checkbox"
-                      checked={item.selected}
-                      onChange={(e) => onUpdateIntent(item.id, { selected: e.target.checked })}
+                      checked={row.selected}
+                      onChange={(e) =>
+                        row.memberIds.forEach((id) => onUpdateIntent(id, { selected: e.target.checked }))
+                      }
                       className="w-4 h-4 rounded-none bg-white border-stone-300 text-[#ff4d00] focus:ring-[#ff4d00]"
                     />
                   </td>
-                  
+
                   {/* Intent Name input cell */}
                   <td className="px-4 py-2">
                     <input
                       type="text"
-                      value={item.name}
-                      onChange={(e) => onUpdateIntent(item.id, { name: e.target.value })}
+                      value={row.name}
+                      onChange={(e) => onUpdateIntent(row.nameId, { name: e.target.value })}
                       className="bg-transparent border-none p-0 text-[13px] font-semibold text-stone-900 w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00]"
                     />
                   </td>
 
-                  {/* Source cell (PRD / Data) */}
+                  {/* Source cell (PRD / Data / PRD+Data) */}
                   <td className="px-4 py-2">
-                    {item.source && (
-                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none ${
-                        item.source === "prd"
+                    {row.sourceLabel && (
+                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none whitespace-nowrap ${
+                        row.sourceLabel === "PRD+Data"
+                          ? "bg-violet-100 text-violet-800 border border-violet-200/50"
+                          : row.sourceLabel === "prd"
                           ? "bg-indigo-100 text-indigo-800 border border-indigo-200/50"
                           : "bg-sky-100 text-sky-800 border border-sky-200/50"
                       }`}>
-                        {item.source}
+                        {row.sourceLabel}
                       </span>
                     )}
                   </td>
 
                   {/* Coverage badge cell */}
                   <td className="px-4 py-2">
-                    {item.coverage && COVERAGE_BADGES[item.coverage] && (
-                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none whitespace-nowrap ${COVERAGE_BADGES[item.coverage].cls}`}>
-                        {COVERAGE_BADGES[item.coverage].label}
+                    {row.coverage && COVERAGE_BADGES[row.coverage] && (
+                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none whitespace-nowrap ${COVERAGE_BADGES[row.coverage].cls}`}>
+                        {COVERAGE_BADGES[row.coverage].label}
                       </span>
                     )}
                   </td>
@@ -231,10 +331,10 @@ export default function IntentCurationTab({
                   <td className="px-4 py-2">
                     <input
                       type="text"
-                      value={item.phase}
-                      onChange={(e) => onUpdateIntent(item.id, { phase: e.target.value })}
+                      value={row.phase}
+                      onChange={(e) => onUpdateIntent(row.phaseId, { phase: e.target.value })}
                       className={`text-[9px] font-bold rounded-none py-1 px-2 uppercase w-full bg-transparent border-none outline-none focus:ring-0 focus:border-b focus:border-[#ff4d00] ${getPhaseStyle(
-                        item.phase
+                        row.phase
                       )}`}
                     />
                   </td>
@@ -242,8 +342,8 @@ export default function IntentCurationTab({
                   {/* Utterance input cell */}
                   <td className="px-4 py-2">
                     <AutoTextarea
-                      value={item.utterance}
-                      onChange={(e) => onUpdateIntent(item.id, { utterance: e.target.value })}
+                      value={row.utterance}
+                      onChange={(e) => onUpdateIntent(row.utteranceId, { utterance: e.target.value })}
                       minRows={2}
                       className="bg-transparent border-none p-0 text-[13px] text-stone-600 italic font-serif w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden"
                     />
@@ -252,8 +352,8 @@ export default function IntentCurationTab({
                   {/* Trigger Moment input cell */}
                   <td className="px-4 py-2">
                     <AutoTextarea
-                      value={item.triggerMoment}
-                      onChange={(e) => onUpdateIntent(item.id, { triggerMoment: e.target.value })}
+                      value={row.triggerMoment}
+                      onChange={(e) => onUpdateIntent(row.momentId, { triggerMoment: e.target.value })}
                       minRows={2}
                       className="bg-transparent border-none p-0 text-[13px] text-stone-500 w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden"
                     />
@@ -269,7 +369,7 @@ export default function IntentCurationTab({
       {/* Pagination / curation info */}
       <div className="px-6 py-3 border-t border-stone-200 flex items-center justify-between bg-stone-50/70">
         <span className="text-[12px] text-stone-500 font-serif italic">
-          {intents.length} intents discovered &bull; {selectedCount} selected for compilation
+          {displayRows.length} intents{displayRows.length !== intents.length ? ` (${intents.length} gốc)` : ""} discovered &bull; {selectedCount} selected for compilation
         </span>
         <div className="flex items-center gap-2">
           <button className="p-1 hover:bg-stone-100 rounded-none disabled:opacity-30 text-stone-400 cursor-pointer" disabled>
