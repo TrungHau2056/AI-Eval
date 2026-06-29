@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Intent, Persona } from "../types";
 import AutoTextarea from "./AutoTextarea";
+import { downloadPersonasJson } from "../utils/exportPersonas";
 
 interface PersonaPlaygroundTabProps {
   intents: Intent[];
@@ -261,14 +262,25 @@ export default function PersonaPlaygroundTab({
             Active testcase rules: {ruleText.slice(0, 75)}...
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onOpenRuleModal}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest transition-all cursor-pointer shadow-xs shrink-0"
-        >
-          <span className="material-symbols-outlined text-[16px]">tune</span>
-          Configure Rules
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => downloadPersonasJson(personas, intents)}
+            disabled={personas.length === 0}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[16px]">download</span>
+            Export Personas
+          </button>
+          <button
+            type="button"
+            onClick={onOpenRuleModal}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest transition-all cursor-pointer shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[16px]">tune</span>
+            Configure Rules
+          </button>
+        </div>
       </div>
 
       {/* Intent Selector Dropdown */}

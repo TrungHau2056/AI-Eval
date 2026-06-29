@@ -264,6 +264,7 @@ export default function App() {
   };
 
   const handleProcessIntents = () => {
+    // Backend đã gom cụm (1 intent = 1 cụm) → chỉ cần lọc selected.
     const selectedIntents = intents.filter((i) => i.selected);
     if (selectedIntents.length === 0) {
       showToast("Please selection at least one intent from curation table.", "error");
@@ -637,12 +638,6 @@ export default function App() {
                 onUpdateTestCase={handleUpdateTestCase}
                 onRunTest={triggerPipelineRun}
                 onOpenLogs={handleOpenStaticLogs}
-                onOpenRuleModal={() => {
-                  setActiveRuleType("testcase");
-                  setPromptText("");
-                  setMdFileName(null);
-                  setIsRuleModalOpen(true);
-                }}
               />
             )}
           </main>

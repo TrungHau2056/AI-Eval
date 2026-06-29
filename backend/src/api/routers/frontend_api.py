@@ -24,7 +24,7 @@ from src.models.schemas import (
     RawInput,
     TestCasePrompt,
 )
-from src.pipeline.intent_comparator import IntentComparator
+from src.pipeline.intent_comparator import cluster_intents
 from src.pipeline.intent_extractor import IntentAgent
 from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
@@ -131,9 +131,9 @@ def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
             utterance=r.get("utterance", ""),
             triggerMoment=r.get("moment", r.get("context", "")),
             selected=True,
-            source=r.get("source") if r.get("source") in ("data", "prd") else "data",
+            source=r.get("source") if isinstance(r.get("source"), list) else ([r["source"]] if r.get("source") else []),
             coverage=r.get("coverage", ""),
-            matchedIds=r.get("matchedIds", []) or [],
+            memberIds=r.get("memberIds", []) or [],
         ))
     return mapped
 
@@ -349,22 +349,27 @@ def discover_intents(req: DiscoverRequest):
         logger.error("Failed to create LLM client: %s", e)
         raise HTTPException(400, str(e))
 
-    async def _run() -> tuple[list[dict], list[dict]]:
-        data_intents: list[dict] = []
-        prd_intents: list[dict] = []
+    async def _run() -> list[dict]:
+        all_intents: list[dict] = []
         if data_content.strip():
             data_intents = await _mine_intents(data_content, guidance, llm, "intent", trace_id=state.trace_id)
+            for it in data_intents:
+                it["source"] = ["data"]
+            all_intents.extend(data_intents)
         if prd_content.strip():
             prd_intents = await _mine_intents(prd_content, "", llm, "intent_prd", trace_id=state.trace_id)
-        if data_intents or prd_intents:
-            comparator = IntentComparator(llm, api_key)
-            prd_intents, data_intents = await comparator.compare(prd_intents, data_intents)
-        return data_intents, prd_intents
+            for it in prd_intents:
+                it["source"] = ["prd"]
+            all_intents.extend(prd_intents)
+        if all_intents:
+            # 1 bước clustering ngữ nghĩa: vừa dedup trong-nguồn vừa đối chiếu chéo PRD↔data.
+            all_intents = await cluster_intents(all_intents, llm, api_key)
+        return all_intents
 
     loop = asyncio.new_event_loop()
     try:
-        logger.info("Starting discovery (data + prd + comparator) ...")
-        data_intents, prd_intents = loop.run_until_complete(_run())
+        logger.info("Starting discovery (mine data + prd → cluster) ...")
+        results = loop.run_until_complete(_run())
     except Exception as e:
         logger.error("Discovery failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Intent: {e}")
@@ -372,11 +377,10 @@ def discover_intents(req: DiscoverRequest):
         loop.close()
         flush_langfuse()
 
-    results = data_intents + prd_intents
     fe_intents = _map_pipeline_intents_to_fe(results)
     state.intents = fe_intents
     state.internal_intents = [Intent(**r) for r in results]
-    logger.info("Stored %d FE intents (data=%d, prd=%d)", len(fe_intents), len(data_intents), len(prd_intents))
+    logger.info("Stored %d FE intents (after clustering)", len(fe_intents))
     if not fe_intents:
         logger.warning(
             "Discovery returned 0 intents | data_chars=%d | prd_chars=%d | social_chars=%d",
@@ -395,10 +399,10 @@ def generate_personas(req: GeneratePersonasRequest):
     if not state.trace_id:
         state.trace_id = uuid.uuid4().hex
 
-    # Use internal intents if available (from discover), otherwise map from FE intents
-    if state.internal_intents:
-        internal_intents = state.internal_intents
-    elif req.intents:
+    # Ưu tiên req.intents (FE đã gộp cặp Confirmed PRD+Data + lọc selected) để
+    # không sinh persona trùng cho cùng 1 intent thực và tôn trọng lựa chọn của user.
+    # Fallback state.internal_intents (toàn bộ từ discover) khi FE không gửi gì.
+    if req.intents:
         internal_intents = []
         for i in req.intents:
             internal_intents.append(Intent(
@@ -407,6 +411,8 @@ def generate_personas(req: GeneratePersonasRequest):
                 utterance=i.get("utterance", ""),
                 moment=i.get("triggerMoment", ""),
             ))
+    elif state.internal_intents:
+        internal_intents = state.internal_intents
     else:
         raise HTTPException(400, "No intents selected. Please select at least one intent to build personas.")
 

@@ -1,7 +1,10 @@
-"""IntentComparator — đối chiếu intent PRD ↔ data (Gap Analysis, FR-B5).
+"""Gom cụm ngữ nghĩa intent đa nguồn (Gap Analysis, một bước duy nhất).
 
-Hybrid: embedding lọc nhanh (cosine) → vùng xám đẩy 1 LLM-pass chấm "cùng intent?".
-Gắn nhãn coverage ∈ {confirmed, prd_only, data_only} + matchedIds lên mỗi intent.
+Hợp nhất data + prd → cluster theo ngữ nghĩa (hybrid: embedding lọc nhanh →
+vùng xám đẩy 1 LLM-pass chấm "cùng intent?"). Mỗi cụm = 1 intent đại diện:
+- source = mảng các nguồn đóng góp (vd ["data","prd"]).
+- coverage suy từ source: cả prd&data → confirmed; chỉ prd → prd_only; chỉ data → data_only.
+Bước này thay cả dedup trong-nguồn lẫn so khớp chéo PRD↔data (không cần so 2 lần).
 """
 import json
 import logging
@@ -16,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def embed(texts: list[str], api_key: str, model: str = "") -> np.ndarray:
-    """Embed list text bằng Gemini text-embedding-004. Trả ma trận (n, dim)."""
+    """Embed list text bằng Gemini text-embedding. Trả ma trận (n, dim)."""
     import google.generativeai as genai
 
     genai.configure(api_key=api_key)
@@ -43,115 +46,165 @@ def _intent_text(it: dict[str, Any]) -> str:
     ).strip()
 
 
-_GRAY_SYSTEM = (
-    "Bạn là chuyên gia phân tích intent. Với mỗi cặp (A từ PRD, B từ data thật), "
-    "xác định A và B có CÙNG một intent người dùng hay không. "
-    "Văn phong có thể lệch (PRD formal vs chat viết tắt) nhưng cùng mục tiêu thì coi là cùng intent. "
+def _sources_of(it: dict[str, Any]) -> list[str]:
+    """Chuẩn hoá source về list (tương thích cả dữ liệu cũ dạng scalar)."""
+    s = it.get("source")
+    if isinstance(s, list):
+        return [x for x in s if x]
+    if isinstance(s, str) and s:
+        return [s]
+    return []
+
+
+_CLUSTER_SYSTEM = (
+    "Bạn là chuyên gia phân tích intent. Với mỗi cặp (A, B), xác định A và B có CÙNG "
+    "một intent người dùng hay không. Văn phong có thể lệch (formal vs chat viết tắt) "
+    "nhưng cùng mục tiêu thì coi là cùng intent. "
     'Trả về JSON: {"results": [{"pair": <số>, "same": true/false}, ...]} và không thêm text nào khác.'
 )
 
 
-class IntentComparator:
-    def __init__(
-        self,
-        llm: LLMClient,
-        api_key: str,
-        embedding_model: str = "",
-        high: float | None = None,
-        low: float | None = None,
-    ):
-        self.llm = llm
-        self.api_key = api_key
-        self.embedding_model = embedding_model or settings.embedding_model
-        self.high = settings.match_high if high is None else high
-        self.low = settings.match_low if low is None else low
+class _UnionFind:
+    def __init__(self, n: int):
+        self.parent = list(range(n))
 
-    async def compare(
-        self, prd_intents: list[dict], data_intents: list[dict]
-    ) -> tuple[list[dict], list[dict]]:
-        """Annotate source + coverage + matchedIds lên 2 tập intent.
+    def find(self, x: int) -> int:
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
 
-        Standalone (1 phía rỗng) → giữ source gốc, coverage="".
-        """
-        for it in prd_intents:
-            it["source"] = "prd"
-        for it in data_intents:
-            it["source"] = "data"
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[rb] = ra
 
-        if not prd_intents or not data_intents:
-            # Standalone: không đối chiếu.
-            return self._no_comparison(prd_intents, data_intents)
 
-        try:
-            prd_vecs = embed([_intent_text(i) for i in prd_intents], self.api_key, self.embedding_model)
-            data_vecs = embed([_intent_text(i) for i in data_intents], self.api_key, self.embedding_model)
-            sim = _cosine_matrix(prd_vecs, data_vecs)
+async def _judge_same(
+    llm: LLMClient, intents: list[dict], pairs: list[tuple[int, int]]
+) -> list[bool]:
+    """LLM chấm từng cặp vùng xám có cùng intent không. Lỗi → mặc định không gộp."""
+    lines = []
+    for idx, (i, j) in enumerate(pairs):
+        a = intents[i].get("intent_name", "")
+        a_utt = intents[i].get("utterance", "")
+        b = intents[j].get("intent_name", "")
+        b_utt = intents[j].get("utterance", "")
+        lines.append(f'{idx}. A="{a}" / "{a_utt}" | B="{b}" / "{b_utt}"')
+    prompt = "Các cặp cần chấm:\n" + "\n".join(lines)
+    verdicts = [False] * len(pairs)
+    try:
+        raw = (await llm.generate(prompt, system_prompt=_CLUSTER_SYSTEM)).strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            raw = raw.rsplit("```", 1)[0]
+        data = json.loads(raw.strip())
+        for r in data.get("results", []):
+            pi = r.get("pair")
+            if isinstance(pi, int) and 0 <= pi < len(verdicts):
+                verdicts[pi] = bool(r.get("same"))
+    except Exception as e:
+        logger.warning("Cluster gray-zone LLM judge failed, default không gộp: %s", e)
+    return verdicts
 
-            matched = np.zeros_like(sim, dtype=bool)
-            gray_pairs: list[tuple[int, int]] = []
-            for i in range(sim.shape[0]):
-                for j in range(sim.shape[1]):
-                    s = sim[i, j]
-                    if s >= self.high:
-                        matched[i, j] = True
-                    elif s > self.low:
-                        gray_pairs.append((i, j))
 
-            if gray_pairs:
-                verdicts = await self._judge_gray(prd_intents, data_intents, gray_pairs)
-                for (i, j), same in zip(gray_pairs, verdicts):
-                    if same:
-                        matched[i, j] = True
+def _coverage_for(sources: list[str], has_prd: bool, has_data: bool) -> str:
+    """Suy coverage từ tập nguồn của cụm. Single-source run (chỉ 1 loại nguồn
+    toàn cục) → "" (standalone, không gán nhãn gap)."""
+    if not (has_prd and has_data):
+        return ""
+    s = set(sources)
+    if "prd" in s and "data" in s:
+        return "confirmed"
+    if "prd" in s:
+        return "prd_only"
+    return "data_only"
 
-            self._apply_coverage(prd_intents, data_intents, matched)
-        except Exception as e:
-            # Embedding/LLM lỗi (404 model, hết quota, mạng...) → không sập discover,
-            # chỉ bỏ cột Coverage (Fallback UX: không che, không crash).
-            logger.warning("IntentComparator degrade (bỏ đối chiếu): %s", e)
-            return self._no_comparison(prd_intents, data_intents)
 
-        return prd_intents, data_intents
+def _merge_cluster(members: list[dict], has_prd: bool, has_data: bool) -> dict:
+    """Gộp các intent trong 1 cụm thành 1 đại diện.
 
-    @staticmethod
-    def _no_comparison(prd_intents: list[dict], data_intents: list[dict]) -> tuple[list[dict], list[dict]]:
-        for it in prd_intents + data_intents:
-            it["coverage"] = ""
-            it["matchedIds"] = []
-        return prd_intents, data_intents
+    name/moment/phase ưu tiên bản prd (canonical); utterance ưu tiên bản data (chat thật).
+    source = hợp các nguồn; memberIds = mọi id gốc.
+    """
+    prd_member = next((m for m in members if "prd" in _sources_of(m)), None)
+    data_member = next((m for m in members if "data" in _sources_of(m)), None)
+    canonical = prd_member or members[0]
+    utter_src = data_member or members[0]
 
-    async def _judge_gray(
-        self, prd_intents: list[dict], data_intents: list[dict], pairs: list[tuple[int, int]]
-    ) -> list[bool]:
-        lines = []
-        for idx, (i, j) in enumerate(pairs):
-            a = prd_intents[i].get("intent_name", "")
-            b = data_intents[j].get("intent_name", "")
-            b_utt = data_intents[j].get("utterance", "")
-            lines.append(f'{idx}. A(PRD)="{a}" | B(data)="{b}" / "{b_utt}"')
-        prompt = "Các cặp cần chấm:\n" + "\n".join(lines)
-        verdicts = [False] * len(pairs)
-        try:
-            raw = await self.llm.generate(prompt, system_prompt=_GRAY_SYSTEM)
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                raw = raw.rsplit("```", 1)[0]
-            data = json.loads(raw.strip())
-            for r in data.get("results", []):
-                pi = r.get("pair")
-                if isinstance(pi, int) and 0 <= pi < len(verdicts):
-                    verdicts[pi] = bool(r.get("same"))
-        except Exception as e:
-            logger.warning("Gray-zone LLM judge failed, default không gộp: %s", e)
-        return verdicts
+    sources = sorted({s for m in members for s in _sources_of(m)})
+    merged = dict(canonical)
+    merged["source"] = sources
+    merged["utterance"] = utter_src.get("utterance", "") or canonical.get("utterance", "")
+    merged["memberIds"] = [m.get("id", "") for m in members]
+    merged["coverage"] = _coverage_for(sources, has_prd, has_data)
+    return merged
 
-    @staticmethod
-    def _apply_coverage(prd_intents: list[dict], data_intents: list[dict], matched: np.ndarray) -> None:
-        for i, it in enumerate(prd_intents):
-            data_ids = [data_intents[j]["id"] for j in range(matched.shape[1]) if matched[i, j]]
-            it["matchedIds"] = data_ids
-            it["coverage"] = "confirmed" if data_ids else "prd_only"
-        for j, it in enumerate(data_intents):
-            prd_ids = [prd_intents[i]["id"] for i in range(matched.shape[0]) if matched[i, j]]
-            it["matchedIds"] = prd_ids
-            it["coverage"] = "confirmed" if prd_ids else "data_only"
+
+def _passthrough(intents: list[dict], has_prd: bool, has_data: bool) -> list[dict]:
+    """Không gom cụm: chuẩn hoá source thành list + gán coverage single. Mỗi intent 1 dòng."""
+    out = []
+    for it in intents:
+        m = dict(it)
+        m["source"] = _sources_of(it)
+        m["memberIds"] = [it.get("id", "")]
+        m["coverage"] = _coverage_for(m["source"], has_prd, has_data)
+        out.append(m)
+    return out
+
+
+async def cluster_intents(
+    intents: list[dict],
+    llm: LLMClient,
+    api_key: str,
+    embedding_model: str = "",
+    high: float | None = None,
+    low: float | None = None,
+) -> list[dict]:
+    """Gom cụm ngữ nghĩa toàn bộ intent (data + prd) → list intent đã gộp.
+
+    Mỗi input nên đã gắn source dạng list (["data"]/["prd"]). Trả về intent đã
+    gắn source (mảng) + coverage + memberIds.
+    """
+    high = settings.match_high if high is None else high
+    low = settings.match_low if low is None else low
+
+    has_prd = any("prd" in _sources_of(it) for it in intents)
+    has_data = any("data" in _sources_of(it) for it in intents)
+
+    if len(intents) < 2:
+        return _passthrough(intents, has_prd, has_data)
+
+    try:
+        vecs = embed(
+            [_intent_text(i) for i in intents],
+            api_key,
+            embedding_model or settings.embedding_model,
+        )
+        sim = _cosine_matrix(vecs, vecs)
+
+        uf = _UnionFind(len(intents))
+        gray_pairs: list[tuple[int, int]] = []
+        for i in range(len(intents)):
+            for j in range(i + 1, len(intents)):
+                s = sim[i, j]
+                if s >= high:
+                    uf.union(i, j)
+                elif s > low:
+                    gray_pairs.append((i, j))
+
+        if gray_pairs:
+            verdicts = await _judge_same(llm, intents, gray_pairs)
+            for (i, j), same in zip(gray_pairs, verdicts):
+                if same:
+                    uf.union(i, j)
+
+        clusters: dict[int, list[dict]] = {}
+        for idx, it in enumerate(intents):
+            clusters.setdefault(uf.find(idx), []).append(it)
+
+        return [_merge_cluster(members, has_prd, has_data) for members in clusters.values()]
+    except Exception as e:
+        # Embedding/LLM lỗi → không cụm, trả mỗi intent 1 dòng (degrade, không mất intent).
+        logger.warning("cluster_intents degrade (bỏ gom cụm): %s", e)
+        return _passthrough(intents, has_prd, has_data)

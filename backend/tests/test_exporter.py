@@ -35,7 +35,7 @@ def test_export_intents_json():
         phase="SUPPORT",
         utterance="cho minh hoan tien",
         triggerMoment="Mua sai hang",
-        source="data",
+        source=["data", "prd"],
         coverage="confirmed",
     )
     internal = Intent(

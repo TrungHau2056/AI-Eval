@@ -7,10 +7,10 @@ function intentToExportRow(intent: Intent) {
     phase: intent.phase,
     utterance: intent.utterance,
     trigger_moment: intent.triggerMoment,
-    source: intent.source ?? "",
+    source: (intent.source ?? []).join("+"),
     coverage: intent.coverage ?? "",
     selected: intent.selected,
-    matched_ids: (intent.matchedIds ?? []).join("; "),
+    member_ids: (intent.memberIds ?? []).join("; "),
   };
 }
 
@@ -18,10 +18,7 @@ export function buildIntentsJson(intents: Intent[]): string {
   const payload = {
     exportedAt: new Date().toISOString(),
     count: intents.length,
-    intents: intents.map((intent) => ({
-      ...intent,
-      triggerMoment: intent.triggerMoment,
-    })),
+    intents: intents.map((intent) => intentToExportRow(intent)),
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -36,7 +33,7 @@ export function buildIntentsCsv(intents: Intent[]): string {
     "source",
     "coverage",
     "selected",
-    "matched_ids",
+    "member_ids",
   ];
 
   const escape = (value: string | boolean) => {

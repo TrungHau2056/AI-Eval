@@ -201,7 +201,9 @@ class IntentAgent:
                 intent_name=intent_name,
                 utterance=utterance,
                 moment=moment,
-                source=item.get("source") or "",
+                # source (gap-analysis provenance) do discover gắn (["data"]/["prd"]);
+                # KHÔNG dùng LLM-guess source ở đây.
+                source=[],
                 phase=item.get("phase") or "",
                 raw_observation=item.get("raw_observation") or "",
                 why_valid=item.get("why_valid") or "",
@@ -223,10 +225,8 @@ class IntentAgent:
         return result
 
     def dedup_semantic(self, intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Hook tích hợp so khớp ngữ nghĩa (FR-B4).
-
-        Mặc định no-op: đối chiếu chéo PRD↔data do IntentComparator đảm nhận
-        (KHÔNG gộp ở đây để tránh che mất tín hiệu Confirmed). Giữ điểm cắm cho
-        dedup ngữ nghĩa trong-nguồn ở vòng sau nếu cần.
+        """Hook no-op. So khớp/gom cụm ngữ nghĩa (cả trong-nguồn lẫn chéo PRD↔data)
+        do `intent_comparator.cluster_intents` đảm nhận ở tầng discover (cần api_key
+        cho embedding). `_deduplicate` lowercase vẫn chạy như pass rẻ trước embed.
         """
         return intents

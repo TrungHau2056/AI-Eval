@@ -19,9 +19,9 @@ class FEIntent(BaseModel):
     triggerMoment: str = ""
     selected: bool = True
     # Gap analysis (Phase 1)
-    source: str = "data"  # data | prd
+    source: list[str] = Field(default_factory=list)  # ["data"] | ["prd"] | ["data","prd"]
     coverage: str = ""  # confirmed | prd_only | data_only | "" (standalone)
-    matchedIds: list[str] = Field(default_factory=list)
+    memberIds: list[str] = Field(default_factory=list)  # id các intent gốc đã gộp vào
 
 
 class FEPersona(BaseModel):
@@ -59,7 +59,7 @@ class Intent(BaseModel):
     intent_name: str = ""
     utterance: str = ""
     moment: str = ""
-    source: str = ""
+    source: list[str] = Field(default_factory=list)  # gap-analysis provenance: ["data"]/["prd"]/cả hai
     phase: str = ""
     raw_observation: str = ""
     why_valid: str = ""

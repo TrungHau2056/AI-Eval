@@ -6,9 +6,9 @@ export interface Intent {
   triggerMoment: string;
   selected: boolean;
   // Gap analysis (Phase 1)
-  source?: 'data' | 'prd';
+  source?: ('data' | 'prd')[];
   coverage?: '' | 'confirmed' | 'prd_only' | 'data_only';
-  matchedIds?: string[];
+  memberIds?: string[];
 }
 
 export interface IngestSource {

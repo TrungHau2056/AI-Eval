@@ -19,10 +19,10 @@ class Exporter:
             "phase": fe.get("phase", ""),
             "utterance": fe.get("utterance", ""),
             "trigger_moment": fe.get("triggerMoment", ""),
-            "source": fe.get("source", ""),
+            "source": "+".join(fe.get("source") or []) if isinstance(fe.get("source"), list) else fe.get("source", ""),
             "coverage": fe.get("coverage", ""),
             "selected": fe.get("selected", True),
-            "matched_ids": "; ".join(fe.get("matchedIds") or []),
+            "member_ids": "; ".join(fe.get("memberIds") or []),
         }
         if internal:
             row.update({

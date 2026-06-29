@@ -14,7 +14,7 @@ from src.ingestion.prd_loader import PRDLoader
 from src.ingestion.social_loader import SocialLoader
 from src.models.schemas import RawInput
 from src.pipeline import intent_comparator
-from src.pipeline.intent_comparator import IntentComparator
+from src.pipeline.intent_comparator import cluster_intents
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -137,45 +137,63 @@ def _fake_embed(texts, api_key, model=""):
     return np.array(out, dtype=float)
 
 
-def test_comparator_coverage(monkeypatch):
+def test_cluster_confirmed_and_gap(monkeypatch):
     monkeypatch.setattr(intent_comparator, "embed", _fake_embed)
-    prd = [
-        {"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": ""},
-        {"id": "p2", "intent_name": "Xuất hóa đơn điện tử", "utterance": "", "moment": ""},
+    intents = [
+        {"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": "", "source": ["prd"]},
+        {"id": "p2", "intent_name": "Xuất hóa đơn điện tử", "utterance": "", "moment": "", "source": ["prd"]},
+        {"id": "d1", "intent_name": "đặt lái thử vf8 t7", "utterance": "đặt lái thử đc k", "moment": "", "source": ["data"]},
+        {"id": "d2", "intent_name": "Báo trạm sạc hỏng", "utterance": "", "moment": "", "source": ["data"]},
     ]
-    data = [
-        {"id": "d1", "intent_name": "đặt lái thử vf8 t7", "utterance": "", "moment": ""},
-        {"id": "d2", "intent_name": "Báo trạm sạc hỏng", "utterance": "", "moment": ""},
+    out = asyncio.run(cluster_intents(intents, _MockLLM(), api_key="x"))
+
+    # p1 + d1 cùng nghĩa ("lái thử") → 1 cụm confirmed, source gồm cả 2, utterance lấy bản data.
+    confirmed = [c for c in out if c["coverage"] == "confirmed"]
+    assert len(confirmed) == 1
+    c = confirmed[0]
+    assert set(c["source"]) == {"data", "prd"}
+    assert c["utterance"] == "đặt lái thử đc k"
+    assert set(c["memberIds"]) == {"p1", "d1"}
+    # p2 chỉ prd, d2 chỉ data.
+    assert any(c["coverage"] == "prd_only" for c in out)
+    assert any(c["coverage"] == "data_only" for c in out)
+    assert len(out) == 3  # 1 confirmed + p2 + d2
+
+
+def test_cluster_dedup_within_source(monkeypatch):
+    monkeypatch.setattr(intent_comparator, "embed", _fake_embed)
+    # Hai intent data cùng nghĩa ("lái thử") + 1 prd cùng nghĩa → gộp hết 1 cụm.
+    intents = [
+        {"id": "d1", "intent_name": "đặt lái thử vf8", "utterance": "", "moment": "", "source": ["data"]},
+        {"id": "d2", "intent_name": "lái thử xe cuối tuần", "utterance": "", "moment": "", "source": ["data"]},
+        {"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": "", "source": ["prd"]},
     ]
-    comparator = IntentComparator(_MockLLM(), api_key="x")
-    prd_out, data_out = asyncio.run(comparator.compare(prd, data))
-
-    by_id = {i["id"]: i for i in prd_out + data_out}
-    assert by_id["p1"]["coverage"] == "confirmed"
-    assert by_id["d1"]["coverage"] == "confirmed"
-    assert by_id["d1"]["id"] in by_id["p1"]["matchedIds"]
-    assert by_id["p2"]["coverage"] == "prd_only"
-    assert by_id["d2"]["coverage"] == "data_only"
+    out = asyncio.run(cluster_intents(intents, _MockLLM(), api_key="x"))
+    assert len(out) == 1
+    assert set(out[0]["source"]) == {"data", "prd"}
+    assert set(out[0]["memberIds"]) == {"d1", "d2", "p1"}
 
 
-def test_comparator_degrades_on_embed_failure(monkeypatch):
+def test_cluster_degrades_on_embed_failure(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("404 model not found")
 
     monkeypatch.setattr(intent_comparator, "embed", _boom)
-    prd = [{"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": ""}]
-    data = [{"id": "d1", "intent_name": "đặt lái thử vf8", "utterance": "", "moment": ""}]
-    comparator = IntentComparator(_MockLLM(), api_key="x")
-    prd_out, data_out = asyncio.run(comparator.compare(prd, data))
-    # Không sập; intent vẫn ra với source đúng, coverage rỗng.
-    assert prd_out[0]["source"] == "prd" and prd_out[0]["coverage"] == ""
-    assert data_out[0]["source"] == "data" and data_out[0]["coverage"] == ""
+    intents = [
+        {"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": "", "source": ["prd"]},
+        {"id": "d1", "intent_name": "đặt lái thử vf8", "utterance": "", "moment": "", "source": ["data"]},
+    ]
+    out = asyncio.run(cluster_intents(intents, _MockLLM(), api_key="x"))
+    # Không sập, không gộp; coverage vẫn suy từ source (cả 2 loại nguồn có mặt).
+    assert len(out) == 2
+    by_id = {i["id"]: i for i in out}
+    assert by_id["p1"]["source"] == ["prd"] and by_id["p1"]["coverage"] == "prd_only"
+    assert by_id["d1"]["source"] == ["data"] and by_id["d1"]["coverage"] == "data_only"
 
 
-def test_comparator_standalone():
-    prd = [{"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": ""}]
-    comparator = IntentComparator(_MockLLM(), api_key="x")
-    prd_out, data_out = asyncio.run(comparator.compare(prd, []))
-    assert prd_out[0]["source"] == "prd"
-    assert prd_out[0]["coverage"] == ""
-    assert data_out == []
+def test_cluster_standalone_single_source():
+    # Chỉ 1 loại nguồn toàn cục → coverage rỗng (không có gì để đối chiếu).
+    intents = [{"id": "p1", "intent_name": "Đặt lịch lái thử", "utterance": "", "moment": "", "source": ["prd"]}]
+    out = asyncio.run(cluster_intents(intents, _MockLLM(), api_key="x"))
+    assert out[0]["source"] == ["prd"]
+    assert out[0]["coverage"] == ""
