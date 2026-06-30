@@ -74,9 +74,11 @@ class IntentComparator:
         Standalone (1 phía rỗng) → giữ source gốc, coverage="".
         """
         for it in prd_intents:
-            it["source"] = "prd"
+            if it.get("source") not in ("prd", "prd_inferred"):
+                it["source"] = "prd"
         for it in data_intents:
-            it["source"] = "data"
+            if it.get("source") != "data":
+                it["source"] = "data"
 
         if not prd_intents or not data_intents:
             # Standalone: không đối chiếu.

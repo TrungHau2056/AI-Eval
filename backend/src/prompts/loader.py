@@ -25,6 +25,8 @@ def reload_prompts() -> None:
 
 INTENT_SYSTEM = _load("intent_system")
 INTENT_USER = _load("intent_user")
+INTENT_PRD_SYSTEM = _load("intent_prd_system")
+INTENT_PRD_USER = _load("intent_prd_user")
 
 PERSONA_GENERATOR_SYSTEM = _load("persona_generator_system")
 PERSONA_GENERATOR_USER = _load("persona_generator_user")

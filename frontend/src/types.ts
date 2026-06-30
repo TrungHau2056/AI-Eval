@@ -1,3 +1,10 @@
+export interface SourcePost {
+  url: string;
+  username: string;
+  platform: string;
+  textExcerpt: string;
+}
+
 export interface Intent {
   id: string;
   name: string;
@@ -6,9 +13,10 @@ export interface Intent {
   triggerMoment: string;
   selected: boolean;
   // Gap analysis (Phase 1)
-  source?: 'data' | 'prd';
+  source?: 'data' | 'prd' | 'prd_inferred';
   coverage?: '' | 'confirmed' | 'prd_only' | 'data_only';
   matchedIds?: string[];
+  sourcePosts?: SourcePost[];
 }
 
 export interface IngestSource {

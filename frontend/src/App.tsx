@@ -8,6 +8,7 @@ import IntentCurationTab from "./components/IntentCurationTab";
 import PersonaPlaygroundTab from "./components/PersonaPlaygroundTab";
 import ExportTab from "./components/ExportTab";
 import RunningTestsModal from "./components/RunningTestsModal";
+import OperationConsole from "./components/OperationConsole";
 import { Intent, Persona, TestCase, IngestStats } from "./types";
 
 export default function App() {
@@ -45,6 +46,10 @@ export default function App() {
   const [mdFileName, setMdFileName] = useState<string | null>(null);
   const [mdFileDragging, setMdFileDragging] = useState(false);
   const fileInputRefRules = useRef<HTMLInputElement>(null);
+
+  // Active long-running operation (drives OperationConsole)
+  const [activeOp, setActiveOp] = useState<string | null>(null);
+  const [prdLoaded, setPrdLoaded] = useState(false);
 
   // Modals & alerts
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
@@ -122,32 +127,42 @@ export default function App() {
     files: { file: File; sourceType: string }[],
     prdFile: File | null,
   ): Promise<IngestStats> => {
-    const fd = new FormData();
-    files.forEach(({ file, sourceType }) => {
-      fd.append("files", file);
-      fd.append("types", sourceType);
-    });
-    if (prdFile) fd.append("prd_file", prdFile);
+    setActiveOp("ingest");
+    try {
+      const fd = new FormData();
+      files.forEach(({ file, sourceType }) => {
+        fd.append("files", file);
+        fd.append("types", sourceType);
+      });
+      if (prdFile) fd.append("prd_file", prdFile);
 
-    const response = await fetch("/api/ingest", { method: "POST", body: fd });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || "Ingest failed.");
+      const response = await fetch("/api/ingest", { method: "POST", body: fd });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || "Ingest failed.");
+      }
+      const stats: IngestStats = await response.json();
+      if (stats.warnings?.length) {
+        showToast(stats.warnings[0], "info");
+      }
+      return stats;
+    } finally {
+      setActiveOp(null);
     }
-    const stats: IngestStats = await response.json();
-    if (stats.warnings?.length) {
-      showToast(stats.warnings[0], "info");
-    }
-    return stats;
   };
 
   // Step 1: Discover Intents
-  const handleDiscover = async (text: string, ruleText?: string) => {
+  const handleDiscover = async (
+    text: string,
+    ruleText?: string,
+    scope: "data" | "prd" | "both" = "both",
+  ) => {
+    setActiveOp("discover");
     try {
       const response = await fetch("/api/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logsText: text, ruleText }),
+        body: JSON.stringify({ logsText: text, ruleText, scope }),
       });
 
       if (!response.ok) {
@@ -156,12 +171,14 @@ export default function App() {
       }
 
       const result = await response.json();
-      
+
       // refresh local state from full-stack state endpoint
       const statsRes = await fetch("/api/state");
       const freshState = await statsRes.json();
       setIntents(freshState.intents || []);
+      setPrdLoaded(!!freshState.prdLoaded);
 
+      const scopeLabel = scope === "data" ? "data" : scope === "prd" ? "PRD" : "data + PRD";
       if (result.fallback) {
         showToast("Demo Mode: Extracted typical intents from transcript parameters.", "info");
       } else if ((result.intents?.length ?? 0) === 0) {
@@ -170,13 +187,15 @@ export default function App() {
           "error",
         );
       } else {
-        showToast(`Successfully extracted ${result.intents.length} unique curated intents!`, "success");
+        showToast(`Successfully extracted ${result.intents.length} intents (${scopeLabel})!`, "success");
       }
 
       setCurrentStep(2); // Jump to curation screen automatically
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Intent parsing failed. Check API configuration.", "error");
+    } finally {
+      setActiveOp(null);
     }
   };
 
@@ -195,7 +214,7 @@ export default function App() {
     postsPerKeyword?: number,
   ): Promise<{ crawlPosts: any[]; newCrawlPosts: any[]; crawlLogs: string[] }> => {
     const slug = platformToSlug(platform);
-
+    setActiveOp("crawl");
     try {
       const response = await fetch(`/api/crawl/${slug}`, {
         method: "POST",
@@ -234,6 +253,8 @@ export default function App() {
       console.error(err);
       showToast(err.message || "Social crawl failed.", "error");
       return { crawlPosts: [], newCrawlPosts: [], crawlLogs: [String(err.message || err)] };
+    } finally {
+      setActiveOp(null);
     }
   };
 
@@ -265,37 +286,35 @@ export default function App() {
     showToast("Added new customer intent to curation grid.", "success");
   };
 
-  const handleProcessIntents = () => {
+  const handleProcessIntents = async () => {
     const selectedIntents = intents.filter((i) => i.selected);
     if (selectedIntents.length === 0) {
       showToast("Please selection at least one intent from curation table.", "error");
       return;
     }
 
-    showToast("Compiling intent dataset for persona simulation...", "info");
-
-    fetch("/api/generate-personas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ intents: selectedIntents, ruleText: personaRule }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Persona generation failed");
-        return res.json();
-      })
-      .then((data) => {
-        setPersonas(data.personas || []);
-        if (data.fallback) {
-          showToast("Generated model test personas for active QA suite.", "info");
-        } else {
-          showToast("AI synthesized optimal test personas successfully!", "success");
-        }
-        setCurrentStep(3); // Jump to step 3!
-      })
-      .catch((err) => {
-        console.error(err);
-        showToast("Failed to compile user personas from intents dataset.", "error");
+    setActiveOp("personas");
+    try {
+      const res = await fetch("/api/generate-personas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intents: selectedIntents, ruleText: personaRule }),
       });
+      if (!res.ok) throw new Error("Persona generation failed");
+      const data = await res.json();
+      setPersonas(data.personas || []);
+      if (data.fallback) {
+        showToast("Generated model test personas for active QA suite.", "info");
+      } else {
+        showToast("AI synthesized optimal test personas successfully!", "success");
+      }
+      setCurrentStep(3);
+    } catch (err: any) {
+      console.error(err);
+      showToast("Failed to compile user personas from intents dataset.", "error");
+    } finally {
+      setActiveOp(null);
+    }
   };
 
   // Step 3: Persona Playground edits
@@ -348,38 +367,37 @@ export default function App() {
     }
   };
 
-  const handleConfirmPersonas = () => {
+  const handleConfirmPersonas = async () => {
     const selectedIntents = intents.filter((i) => i.selected);
-    showToast("Generating optimal software tests for active compilation suite...", "info");
-
-    fetch("/api/generate-testcases", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ intents: selectedIntents, personas: personas, ruleText: testCaseRule }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Test compiles failed");
-        return res.json();
-      })
-      .then((data) => {
-        setTestCases(data.testCases || []);
-        if (data.fallback) {
-          showToast("Synthetic Test Suite compiled successfully.", "info");
-        } else {
-          showToast("AI compiled optimized diagnostics test scenarios!", "success");
-        }
-        setCurrentStep(4); // navigate to finale
-      })
-      .catch((err) => {
-        console.error(err);
-        showToast("Compile failed. Verify model limits.", "error");
+    setActiveOp("testcases");
+    try {
+      const res = await fetch("/api/generate-testcases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intents: selectedIntents, personas: personas, ruleText: testCaseRule }),
       });
+      if (!res.ok) throw new Error("Test compiles failed");
+      const data = await res.json();
+      setTestCases(data.testCases || []);
+      if (data.fallback) {
+        showToast("Synthetic Test Suite compiled successfully.", "info");
+      } else {
+        showToast("AI compiled optimized diagnostics test scenarios!", "success");
+      }
+      setCurrentStep(4);
+    } catch (err: any) {
+      console.error(err);
+      showToast("Compile failed. Verify model limits.", "error");
+    } finally {
+      setActiveOp(null);
+    }
   };
 
   // Direct rule compilers & MD files importers
   const handleCompileRule = async () => {
     if (!promptText.trim()) return;
     setCompilingRule(true);
+    setActiveOp("rule");
     let currentRuleText = "";
     if (activeRuleType === "intent") currentRuleText = intentRule;
     else if (activeRuleType === "persona") currentRuleText = personaRule;
@@ -415,6 +433,7 @@ export default function App() {
       showToast("Could not refine directive. Check Gemini connection status.", "error");
     } finally {
       setCompilingRule(false);
+      setActiveOp(null);
     }
   };
 
@@ -590,6 +609,8 @@ export default function App() {
                 onCrawlSocial={handleCrawlSocial}
                 onProceedToCuration={() => setCurrentStep(2)}
                 ruleText={intentRule}
+                onToast={showToast}
+                prdLoaded={prdLoaded}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");
                   setPromptText("");
@@ -607,6 +628,7 @@ export default function App() {
                 onAddIntent={handleAddIntent}
                 onProcessIntents={handleProcessIntents}
                 ruleText={personaRule}
+                onToast={showToast}
                 onOpenRuleModal={() => {
                   setActiveRuleType("persona");
                   setPromptText("");
@@ -665,6 +687,9 @@ export default function App() {
 
         </div>
       </div>
+
+      {/* Operation status console (bottom bar) */}
+      <OperationConsole operation={activeOp} />
 
       {/* Pipeline execution / logs modal */}
       <RunningTestsModal

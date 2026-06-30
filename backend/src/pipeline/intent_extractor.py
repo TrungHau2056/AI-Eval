@@ -27,10 +27,12 @@ class IntentState(TypedDict):
 
 
 class IntentAgent:
-    def __init__(self, llm: LLMClient, memory: BaseMemory | None = None, max_chunk_tokens: int = 50000):
+    def __init__(self, llm: LLMClient, memory: BaseMemory | None = None, max_chunk_tokens: int = 50000, system_prompt: str | None = None, user_template: str | None = None):
         self.llm = llm
         self.memory = memory or ConversationMemory()
         self.max_chunk_tokens = max_chunk_tokens
+        self.system_prompt = system_prompt if system_prompt is not None else INTENT_SYSTEM
+        self.user_template = user_template if user_template is not None else INTENT_USER
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -89,9 +91,13 @@ class IntentAgent:
             trace_id=trace_id,
             parent_span_id=parent_span_id,
         ) as generation:
-            raw = await self.llm.generate(prompt, system_prompt=INTENT_SYSTEM)
+            raw = await self.llm.generate(prompt, system_prompt=self.system_prompt)
             intents = self._parse(raw)
-            logger.info("IntentGraph | extract_intents_chunk | parsed %d intents from chunk %d", len(intents), idx + 1)
+            src_dist = {}
+            for i in intents:
+                s = i.get("source", "")
+                src_dist[s] = src_dist.get(s, 0) + 1
+            logger.info("IntentGraph | extract_intents_chunk | parsed %d intents from chunk %d | sources=%s", len(intents), idx + 1, src_dist)
             
             generation.update(
                 output=raw if capture_io_enabled() else {"intent_count": len(intents)}
@@ -158,16 +164,18 @@ class IntentAgent:
         self.memory.clear()
 
     def _build_prompt(self, raw_text: str, guidance: str) -> str:
+        import collections
         memory_context = ""
         ctx = self.memory.get_context()
         if ctx:
             memory_context = f"\n\n**Lich su / Goi y tu truoc:**\n{ctx}"
 
-        return INTENT_USER.format(
+        kwargs = dict(
             raw_text=raw_text,
             guidance=f"Huong dan them: {guidance}" if guidance else "",
             memory_context=memory_context,
         )
+        return self.user_template.format_map(collections.defaultdict(str, kwargs))
 
     def _parse(self, raw: str) -> list[dict[str, Any]]:
         text = raw.strip()

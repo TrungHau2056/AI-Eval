@@ -7,7 +7,11 @@ interface StagedFile {
 }
 
 interface DataIngestionTabProps {
-  onDiscover: (text: string, ruleText?: string) => Promise<void>;
+  onDiscover: (
+    text: string,
+    ruleText?: string,
+    scope?: "data" | "prd" | "both",
+  ) => Promise<void>;
   onIngest: (
     files: { file: File; sourceType: string }[],
     prdFile: File | null,
@@ -21,6 +25,8 @@ interface DataIngestionTabProps {
   ruleText: string;
   onOpenRuleModal: () => void;
   onProceedToCuration?: () => void;
+  onToast?: (message: string, type: "success" | "info" | "error") => void;
+  prdLoaded?: boolean;
 }
 
 const SOURCE_OPTIONS = ["survey", "social", "text"];
@@ -50,37 +56,37 @@ const PRESET_DOMAINS = [
     id: "du-lich",
     label: "Du lịch",
     icon: "explore",
-    tags: ["hủy vé", "khách sạn", "vũng tàu", "đà lạt", "tour giá rẻ", "hành lý"]
+    tags: ["#hủy_vé", "#khách_sạn", "#vũng_tàu", "#đà_lạt", "#tour_giá_rẻ", "#hành_lý"]
   },
   {
     id: "giai-tri",
     label: "Giải trí",
     icon: "theater_comedy",
-    tags: ["concert", "netflix", "bản quyền", "vé vip", "livestream", "phim bom tấn"]
+    tags: ["#concert", "#netflix", "#bản_quyền", "#vé_vip", "#livestream", "#phim_bom_tấn"]
   },
   {
     id: "the-thao",
     label: "Thể thao",
     icon: "sports_soccer",
-    tags: ["marathon", "đăng ký bib", "giải chạy", "gym card", "gián đoạn", "bóng đá"]
+    tags: ["#marathon", "#đăng_ký_bib", "#giải_chạy", "#gym_card", "#gián_đoạn", "#bóng_đá"]
   },
   {
     id: "cong-nghe",
     label: "Công nghệ",
     icon: "devices",
-    tags: ["lỗi app", "cập nhật", "bảo mật", "api key", "lag", "crash"]
+    tags: ["#lỗi_app", "#cập_nhật", "#bảo_mật", "#api_key", "#lag", "#crash"]
   },
   {
     id: "tai-chinh",
     label: "Tài chính",
     icon: "payments",
-    tags: ["giao dịch", "hoàn tiền", "lãi suất", "thanh toán", "bị khóa", "mã otp"]
+    tags: ["#giao_dịch", "#hoàn_tiền", "#lãi_suất", "#thanh_toán", "#bị_khóa", "#mã_otp"]
   },
   {
     id: "giao-duc",
     label: "Giáo dục",
     icon: "school",
-    tags: ["khóa học", "học phí", "chứng chỉ", "thi thử", "tài liệu", "đăng ký"]
+    tags: ["#khóa_học", "#học_phí", "#chứng_chỉ", "#thi_thử", "#tài_liệu", "#đăng_ký"]
   }
 ];
 
@@ -91,6 +97,8 @@ export default function DataIngestionTab({
   ruleText,
   onOpenRuleModal,
   onProceedToCuration,
+  onToast,
+  prdLoaded,
 }: DataIngestionTabProps) {
   // ---- Multi-source ingest + PRD ----
   const [logsText, setLogsText] = useState("");
@@ -101,6 +109,12 @@ export default function DataIngestionTab({
   const [stats, setStats] = useState<IngestStats | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prdInputRef = useRef<HTMLInputElement>(null);
+  const [isPrdDragging, setIsPrdDragging] = useState(false);
+
+  // Discovery scope: which flow(s) the single Run button acts on.
+  const [discoveryScope, setDiscoveryScope] = useState<"data" | "prd" | "both">("data");
+  // PRD is available if one was just uploaded locally, ingested, or already in backend state.
+  const prdAvailable = !!prdFile || !!stats?.prd_loaded || !!prdLoaded;
 
   // ---- Social Trend Explorer ----
   const [socialLoading, setSocialLoading] = useState(false);
@@ -112,9 +126,11 @@ export default function DataIngestionTab({
   const [isCustomDomain, setIsCustomDomain] = useState(false);
   const [customDomainLabel, setCustomDomainLabel] = useState("");
   const [showDomainDropdown, setShowDomainDropdown] = useState(false);
-  const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeywordInput, setNewKeywordInput] = useState("");
-  const [isViral, setIsViral] = useState(false);
+  const keywordInputRef = useRef<HTMLInputElement>(null);
+  const keywords = newKeywordInput.split(",").map((k) => k.trim()).filter(Boolean);
+  const [isViral, setIsViral] = useState(true);
+  const [showCrawlSettings, setShowCrawlSettings] = useState(false);
   // Posts to crawl per keyword (shared across all platforms). No default — user must enter.
   const [postsPerKeyword, setPostsPerKeyword] = useState<string>("");
 
@@ -142,15 +158,22 @@ export default function DataIngestionTab({
       .catch((err) => console.error("Failed to load saved crawl posts:", err));
   }, []);
 
+  // If PRD becomes unavailable while a PRD-requiring scope is selected, fall back to Data.
+  useEffect(() => {
+    if (!prdAvailable && discoveryScope !== "data") {
+      setDiscoveryScope("data");
+    }
+  }, [prdAvailable, discoveryScope]);
+
   // Auto-populate keywords when preset domain changes
   useEffect(() => {
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setKeywords(normalizeKeywords(found.tags));
+        setNewKeywordInput(found.tags.join(", "));
       }
     } else {
-      setKeywords(normalizeKeywords(["yêu cầu mới", "góp ý", "hỗ trợ"]));
+      setNewKeywordInput("#yêu_cầu_mới, #góp_ý, #hỗ_trợ");
     }
   }, [selectedDomainId, isCustomDomain]);
 
@@ -196,18 +219,47 @@ export default function DataIngestionTab({
     if (e.target.files && e.target.files.length > 0) {
       setPrdFile(e.target.files[0]);
       setStats(null);
+      // Uploading a PRD implies wanting it analyzed → nudge scope to include gap analysis.
+      setDiscoveryScope("both");
     }
     e.target.value = "";
+  };
+
+  const handlePrdDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsPrdDragging(true);
+  };
+  const handlePrdDragLeave = () => setIsPrdDragging(false);
+  const handlePrdDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsPrdDragging(false);
+    if (e.dataTransfer.files.length > 0) {
+      setPrdFile(e.dataTransfer.files[0]);
+      setStats(null);
+      setDiscoveryScope("both");
+    }
   };
 
   // Run Intent Discovery from uploaded/pasted sources and/or persisted social crawl data.
   const handleSubmit = async () => {
     const hasFiles = stagedFiles.length > 0 || prdFile;
     const hasCrawledData = crawledPosts.length > 0;
-    if (!hasFiles && logsText.trim().length === 0 && !hasCrawledData) {
-      alert("Add a file/PRD, paste raw text, or crawl social data first.");
+    const hasDataSource = stagedFiles.length > 0 || logsText.trim().length > 0 || hasCrawledData;
+
+    // Validate against the chosen scope.
+    if (discoveryScope === "data" && !hasDataSource) {
+      onToast?.("Scope 'Data' cần crawl data, paste text, hoặc upload file trước.", "error");
       return;
     }
+    if (discoveryScope === "prd" && !prdAvailable) {
+      onToast?.("Scope 'PRD' cần upload PRD trước.", "error");
+      return;
+    }
+    if (discoveryScope === "both" && !hasDataSource && !prdAvailable) {
+      onToast?.("Add a file/PRD, paste raw text, or crawl social data first.", "error");
+      return;
+    }
+
     setLoading(true);
     try {
       // Server-side ingest (FormData) for files + PRD; paste-text goes straight to discover.
@@ -215,13 +267,13 @@ export default function DataIngestionTab({
         const ingestStats = await onIngest(stagedFiles, prdFile);
         setStats(ingestStats);
         // logsText (paste) takes precedence; else "" → backend uses ingested state.
-        await onDiscover(logsText.trim(), ruleText);
+        await onDiscover(logsText.trim(), ruleText, discoveryScope);
       } else {
-        await onDiscover(logsText, ruleText);
+        await onDiscover(logsText, ruleText, discoveryScope);
       }
     } catch (e: any) {
       console.error(e);
-      alert(e.message || "Ingest/discovery failed.");
+      onToast?.(e.message || "Ingest/discovery failed.", "error");
     } finally {
       setLoading(false);
     }
@@ -236,14 +288,14 @@ export default function DataIngestionTab({
     // Require at least one selected platform.
     const activeList = getActivePlatforms();
     if (activeList.length === 0) {
-      alert("Please select at least one social platform.");
+      onToast?.("Please select at least one social platform.", "error");
       return;
     }
 
     // Require an explicit posts-per-keyword count (no default).
     const perKeyword = parseInt(postsPerKeyword, 10);
     if (!perKeyword || perKeyword < 1) {
-      alert("Nhập số posts muốn crawl mỗi keyword (>= 1).");
+      onToast?.("Nhập số posts muốn crawl mỗi keyword (>= 1).", "error");
       return;
     }
 
@@ -272,7 +324,7 @@ export default function DataIngestionTab({
       } else {
         setSocialResultsText(mergedPosts.length > 0 ? `${mergedPosts.length} posts in sheet (no new posts this run).` : "");
         const detail = crawlLogs.length > 0 ? crawlLogs.join(" ") : "No posts matched the selected keywords.";
-        alert(`Crawl finished but returned 0 new posts. ${detail}`);
+        onToast?.(`Crawl finished but returned 0 new posts. ${detail}`, "info");
       }
     } catch (e) {
       console.error(e);
@@ -281,23 +333,26 @@ export default function DataIngestionTab({
     }
   };
 
-  // Add keyword tag
-  const handleAddKeyword = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const clean = newKeywordInput.trim();
-    if (!clean) return;
-
-    const formatted = normalizeKeyword(clean);
-    if (!formatted) return;
-    if (!keywords.includes(formatted)) {
-      setKeywords([...keywords, formatted]);
+  // Suggested hashtags based on current domain
+  const getRecommendedTags = () => {
+    if (isCustomDomain) {
+      return ["#yêu_cầu_mới", "#góp_ý", "#hỗ_trợ", "#đánh_giá", "#chất_lượng", "#báo_giá", "#tư_vấn", "#khuyến_mãi"];
     }
-    setNewKeywordInput("");
+    const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
+    return found ? found.tags : ["#phản_hồi", "#hỗ_trợ"];
   };
 
-  // Remove keyword tag
-  const handleRemoveKeyword = (indexToRemove: number) => {
-    setKeywords(keywords.filter((_, i) => i !== indexToRemove));
+  // Toggle a suggested hashtag in/out of the keyword input string
+  const handleSelectSuggestedTag = (tag: string) => {
+    setNewKeywordInput((prev) => {
+      const parts = prev.split(",").map((p) => p.trim()).filter(Boolean);
+      if (parts.includes(tag)) {
+        return parts.filter((p) => p !== tag).join(", ");
+      } else {
+        return [...parts, tag].join(", ");
+      }
+    });
+    keywordInputRef.current?.focus();
   };
 
   // Delete a single crawled post (by sheet index) from backend store + local sheet.
@@ -317,7 +372,7 @@ export default function DataIngestionTab({
       setSocialResultsText(posts.length > 0 ? `${posts.length} posts in sheet.` : "");
     } catch (err) {
       console.error("Failed to delete crawled post:", err);
-      alert("Không xóa được dòng này. Vui lòng thử lại.");
+      onToast?.("Không xóa được dòng này. Vui lòng thử lại.", "error");
     }
   };
 
@@ -326,10 +381,10 @@ export default function DataIngestionTab({
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setKeywords(normalizeKeywords(found.tags));
+        setNewKeywordInput(found.tags.join(", "));
       }
     } else {
-      setKeywords(normalizeKeywords(["yêu cầu mới", "góp ý", "hỗ trợ"]));
+      setNewKeywordInput("#yêu_cầu_mới, #góp_ý, #hỗ_trợ");
     }
   };
 
@@ -365,120 +420,143 @@ export default function DataIngestionTab({
               Data Ingestion & Intent Discovery
             </h3>
             <p className="text-[11px] text-stone-400 font-serif italic mt-1">
-              Upload multi-source data or explore live social trends to discover user intents — both flows feed the same pipeline.
+              Two source families feed the same pipeline: a PRD spec (baseline for gap analysis) and Data (documents, raw text, and live social crawl).
             </p>
           </div>
 
-          {/* Two input groups inside one workspace (no Method A/B split) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Hidden file inputs (shared) */}
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,.xlsx,.json,.jsonl,.md,.txt" multiple className="hidden" />
+          <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt" className="hidden" />
 
-            {/* GROUP: Input Sources */}
-            <div className="space-y-6">
-              <div className="border-b border-stone-100 pb-3">
-                <h4 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-700 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">upload_file</span>
-                  Input Sources
-                </h4>
-                <p className="text-[11px] text-stone-400 font-serif italic mt-1">
-                  Upload files (survey / social / text) + optional PRD, or paste raw text. At least one source is required.
-                </p>
+          {/* TOP TIER — PRD | Social Crawl, equal weight, the two primary intent sources */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-0">
+
+            {/* GROUP: PRD */}
+            <div className="flex flex-col gap-6 pb-6 border-b border-stone-200 lg:pb-0 lg:border-b-0 lg:border-r lg:border-stone-200 lg:pr-8">
+              <div className="border-b border-stone-100 pb-3 flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-[#ff4d00] text-[20px] mt-0.5">description</span>
+                <div>
+                  <h4 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-800">
+                    PRD · Product Specification
+                  </h4>
+                  <p className="text-[11px] text-stone-500 font-serif italic mt-0.5">
+                    Trích xuất intent tường minh + tự khai phá gap/inferred intents từ spec — baseline cho gap analysis.
+                  </p>
+                </div>
               </div>
 
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,.xlsx,.json,.jsonl,.md,.txt" multiple className="hidden" />
-              <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt" className="hidden" />
-
-              {/* Multi-file drop zone */}
+              {/* PRD drag-and-drop zone */}
               <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
+                onDragOver={handlePrdDragOver}
+                onDragLeave={handlePrdDragLeave}
+                onDrop={handlePrdDrop}
+                onClick={() => prdInputRef.current?.click()}
                 className={`flex flex-col items-center justify-center border-2 border-dashed rounded-none p-8 transition-all cursor-pointer group ${
-                  isDragging ? "border-[#ff4d00] bg-[#ff4d00]/5" : "border-stone-200 bg-stone-50/50 hover:border-[#ff4d00] hover:bg-stone-50"
+                  isPrdDragging ? "border-[#ff4d00] bg-[#ff4d00]/10" : "border-[#ff4d00]/30 bg-white hover:border-[#ff4d00] hover:bg-[#ff4d00]/5"
                 }`}
               >
-                <span className={`material-symbols-outlined text-[40px] mb-2 transition-colors ${isDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>cloud_upload</span>
-                <p className="text-[13px] uppercase tracking-wider font-bold text-stone-700 text-center">+ Add files (multi-source)</p>
-                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">Supported: .csv, .xlsx, .json, .md, .txt</p>
+                <span className={`material-symbols-outlined text-[40px] mb-2 transition-colors ${isPrdDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>upload_file</span>
+                <p className="text-[13px] uppercase tracking-wider font-bold text-stone-700 text-center">Drag & drop PRD here</p>
+                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">or click to upload · .md, .txt</p>
               </div>
 
-              {/* Staged file list with per-file source dropdown */}
-              {stagedFiles.length > 0 && (
-                <div className="border border-stone-200">
-                  {stagedFiles.map((sf, idx) => (
-                    <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 last:border-b-0">
-                      <span className="text-[12px] font-mono text-stone-700 truncate flex-1">{sf.file.name}</span>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <select
-                          value={sf.sourceType}
-                          onChange={(e) => setRowType(idx, e.target.value)}
-                          className="text-[11px] font-mono uppercase tracking-wider border border-stone-300 bg-white px-2 py-1 outline-none focus:border-[#ff4d00] cursor-pointer"
-                        >
-                          {SOURCE_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => removeRow(idx)} className="text-stone-400 hover:text-[#ff4d00] bg-transparent border-0 cursor-pointer" title="Remove">
-                          <span className="material-symbols-outlined text-[18px]">close</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* PRD context upload */}
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">PRD context:</span>
-                <button
-                  type="button"
-                  onClick={() => prdInputRef.current?.click()}
-                  className="px-4 py-2 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest cursor-pointer"
-                >
-                  Upload PRD
-                </button>
-                {prdFile && (
-                  <span className="text-[11px] font-mono text-stone-600">
-                    {prdFile.name} (loaded)
-                    <button onClick={() => setPrdFile(null)} className="ml-2 text-[#ff4d00] hover:underline bg-transparent border-0 cursor-pointer uppercase text-[10px] font-bold">clear</button>
+              {/* PRD status */}
+              <div>
+                {prdFile ? (
+                  <span className="text-[11px] font-mono text-stone-600 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-emerald-500">check_circle</span>
+                    {prdFile.name}
+                    <button onClick={() => setPrdFile(null)} className="ml-1 text-[#ff4d00] hover:underline bg-transparent border-0 cursor-pointer uppercase text-[10px] font-bold">clear</button>
                   </span>
+                ) : prdAvailable ? (
+                  <span className="text-[11px] font-mono text-emerald-600 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                    PRD loaded
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-mono text-stone-400 italic">No PRD loaded</span>
                 )}
               </div>
 
-              {/* Paste raw text */}
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">Or paste raw social text (post + comment)</label>
-                <textarea
-                  value={logsText}
-                  onChange={(e) => setLogsText(e.target.value)}
-                  className="w-full h-32 bg-stone-50/50 border border-stone-200 rounded-none p-4 text-[13px] font-mono focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all placeholder:text-stone-400 text-stone-800"
-                  placeholder={`Paste social posts + comments here, e.g.\n"where can I charge it?"\n"can I book a vf8 test drive this Saturday?"`}
-                />
-              </div>
-
-              {/* Ingest preview stats */}
-              {stats && (
-                <div className="border border-stone-200 bg-stone-50/60 px-4 py-3">
-                  <p className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] mb-1.5">Ingest preview</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono text-stone-700">
-                    {stats.sources.map((s, i) => (
-                      <span key={i} className={s.status === "skipped" ? "text-rose-600" : ""}>
-                        {s.source_type} {s.filename}: {s.rows_in}{s.status === "skipped" ? " skip" : ""}
-                      </span>
-                    ))}
-                    {stats.prd_loaded && <span className="text-[#ff4d00]">PRD loaded</span>}
-                    <span>· {stats.total_chars} chars</span>
-                  </div>
+              {/* Documents & Raw Text — supplementary, nested below PRD, least important */}
+              <div className="border-t border-stone-100 pt-5 flex flex-col gap-3">
+                <div>
+                  <h5 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-stone-500 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-stone-400">article</span>
+                    Documents & Raw Text
+                  </h5>
+                  <p className="text-[10.5px] text-stone-400 font-serif italic mt-0.5">Tài liệu bổ sung (survey, transcript...) — không bắt buộc</p>
                 </div>
-              )}
+
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`flex items-center justify-center gap-2 border-2 border-dashed rounded-none px-4 py-4 transition-all cursor-pointer group ${
+                    isDragging ? "border-[#ff4d00] bg-[#ff4d00]/5" : "border-stone-200 bg-white hover:border-[#ff4d00] hover:bg-stone-50"
+                  }`}
+                >
+                  <span className={`material-symbols-outlined text-[20px] transition-colors ${isDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>cloud_upload</span>
+                  <p className="text-[11px] uppercase tracking-wider font-bold text-stone-600">+ Add files (.csv, .xlsx, .json, .md, .txt)</p>
+                </div>
+
+                {stagedFiles.length > 0 && (
+                  <div className="border border-stone-200">
+                    {stagedFiles.map((sf, idx) => (
+                      <div key={idx} className="flex items-center justify-between px-3 py-1.5 border-b border-stone-100 last:border-b-0">
+                        <span className="text-[11px] font-mono text-stone-700 truncate flex-1">{sf.file.name}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <select
+                            value={sf.sourceType}
+                            onChange={(e) => setRowType(idx, e.target.value)}
+                            className="text-[10px] font-mono uppercase tracking-wider border border-stone-300 bg-white px-1.5 py-0.5 outline-none focus:border-[#ff4d00] cursor-pointer"
+                          >
+                            {SOURCE_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <button onClick={() => removeRow(idx)} className="text-stone-400 hover:text-[#ff4d00] bg-transparent border-0 cursor-pointer" title="Remove">
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {stats && (
+                  <div className="border border-stone-200 bg-white px-3 py-2">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] font-mono text-stone-700">
+                      {stats.sources.map((s, i) => (
+                        <span key={i} className={s.status === "skipped" ? "text-rose-600" : ""}>
+                          {s.source_type} {s.filename}: {s.rows_in}{s.status === "skipped" ? " skip" : ""}
+                        </span>
+                      ))}
+                      {stats.prd_loaded && <span className="text-[#ff4d00]">PRD loaded</span>}
+                      <span>· {stats.total_chars} chars</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-stone-400 uppercase tracking-[0.2em]">Or paste raw social text (post + comment)</label>
+                  <textarea
+                    value={logsText}
+                    onChange={(e) => setLogsText(e.target.value)}
+                    className="w-full h-24 bg-white border border-stone-200 rounded-none p-3 text-[12px] font-mono focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none transition-all placeholder:text-stone-400 text-stone-800"
+                    placeholder={`Paste social posts + comments here...`}
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* GROUP: Social Trend Explorer */}
-            <div className="space-y-6">
+            {/* GROUP: Social Crawl */}
+            <div className="flex flex-col gap-6 pt-6 lg:pt-0 lg:pl-8">
               <div className="border-b border-stone-100 pb-3">
                 <h4 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-stone-700 flex items-center gap-2">
                   <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">explore</span>
-                  Social Trend Explorer
+                  Social Crawl
                 </h4>
                 <p className="text-[11px] text-stone-400 font-serif italic mt-1">
                   Discover consumer complaints and strategic intents directly from active social networks.
@@ -622,182 +700,241 @@ export default function DataIngestionTab({
                 </div>
               </div>
 
-              {/* Posts per keyword (shared across all platforms) */}
+              {/* Crawl Settings — collapsible: posts/keyword, hashtags & search keywords, engagement toggle */}
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between items-center">
-                  <span>Posts mỗi keyword (mọi nền tảng)</span>
-                  <span className="font-mono text-[9px] text-stone-400 normal-case tracking-normal">áp dụng cho từng keyword</span>
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={postsPerKeyword}
-                  onChange={(e) => setPostsPerKeyword(e.target.value)}
-                  placeholder="Nhập số posts muốn crawl mỗi keyword (vd. 2)"
-                  className="w-full bg-white border border-stone-200 px-4 py-3 text-[11px] font-mono focus:border-[#ff4d00] focus:ring-1 focus:ring-[#ff4d00] outline-none"
-                />
-              </div>
-
-              {/* Keywords manager */}
-              <div className="flex flex-col gap-2 p-4 bg-white border border-stone-200">
-                <div className="flex items-center justify-between border-b border-stone-100 pb-2">
-                  <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[14px] text-stone-400">tag</span>
-                    Search keywords ({keywords.length})
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleResetKeywords}
-                    className="text-[9px] font-mono font-bold text-stone-400 hover:text-[#ff4d00] uppercase tracking-wider"
-                  >
-                    Reset to defaults
-                  </button>
-                </div>
-
-                {/* Keyword input container */}
-                <form onSubmit={handleAddKeyword} className="flex gap-1.5 mt-2">
-                  <input
-                    type="text"
-                    value={newKeywordInput}
-                    onChange={(e) => setNewKeywordInput(e.target.value.replace(/#/g, ""))}
-                    placeholder="Add a new keyword (e.g. giá vé)"
-                    className="flex-grow bg-stone-50 border border-stone-200 px-3 py-1.5 text-[11px] font-mono focus:border-[#ff4d00] outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="px-3 bg-stone-900 hover:bg-stone-850 text-white font-mono text-[11px] font-bold uppercase transition-all"
-                  >
-                    + Add
-                  </button>
-                </form>
-
-                {/* Tags Grid */}
-                <div className="mt-3 flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto custom-scrollbar p-0.5">
-                  {keywords.length === 0 ? (
-                    <p className="text-[10px] font-serif italic text-stone-400 py-1">
-                      No keywords yet. Add keywords to better guide the AI.
-                    </p>
-                  ) : (
-                    keywords.map((kw, idx) => (
-                      <div
-                        key={`${kw}-${idx}`}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#ff4d00]/5 border border-[#ff4d00]/20 text-[#ff4d00] text-[10px] font-mono font-medium rounded-none group"
-                      >
-                        <span>{kw}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveKeyword(idx)}
-                          className="hover:bg-[#ff4d00]/10 text-stone-400 hover:text-[#ff4d00] rounded-full w-3.5 h-3.5 flex items-center justify-center transition-all cursor-pointer"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Virality Toggle */}
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">
-                  Engagement / Popularity level
-                </label>
                 <button
                   type="button"
-                  onClick={() => setIsViral(!isViral)}
-                  className={`flex items-center justify-between px-4 py-3 border transition-all text-left w-full cursor-pointer ${
-                    isViral
-                      ? "bg-[#ff4d00]/5 border-[#ff4d00] text-[#ff4d00]"
-                      : "bg-white border-stone-200 text-stone-700 hover:bg-stone-50"
-                  }`}
+                  onClick={() => setShowCrawlSettings(!showCrawlSettings)}
+                  className="w-full bg-white border border-stone-200 hover:border-stone-300 px-4 py-3 flex items-center justify-between text-left cursor-pointer transition-all"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="material-symbols-outlined text-[18px]">
-                      {isViral ? "local_fire_department" : "trending_flat"}
-                    </span>
+                    <span className="material-symbols-outlined text-[18px] text-[#ff4d00]">tune</span>
                     <div>
-                      <p className="text-[11px] uppercase font-bold tracking-wider">Include viral signals</p>
+                      <span className="text-[11px] uppercase font-bold tracking-wider text-stone-800">Crawl Settings</span>
                       <p className="text-[9.5px] text-stone-400 font-serif italic mt-0.5">
-                        {isViral ? "Collect discussions with very high engagement" : "Standard engagement mode"}
+                        {postsPerKeyword || "?"} posts/keyword · {keywords.length} keywords · viral {isViral ? "on" : "off"}
                       </p>
                     </div>
                   </div>
-                  <div className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors duration-300 shrink-0 ${isViral ? "bg-[#ff4d00]" : "bg-stone-300"}`}>
-                    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isViral ? "translate-x-5" : "translate-x-0"}`} />
-                  </div>
+                  <span className="material-symbols-outlined text-[18px] text-stone-400">
+                    {showCrawlSettings ? "keyboard_arrow_up" : "keyboard_arrow_down"}
+                  </span>
                 </button>
+
+                {showCrawlSettings && (
+                  <div className="flex flex-col gap-6 mt-2 animate-fadeIn">
+                    {/* Posts per keyword (shared across all platforms) */}
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between items-center">
+                        <span>Posts mỗi keyword (mọi nền tảng)</span>
+                        <span className="font-mono text-[9px] text-stone-400 normal-case tracking-normal">áp dụng cho từng keyword</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={postsPerKeyword}
+                        onChange={(e) => setPostsPerKeyword(e.target.value)}
+                        placeholder="Nhập số posts muốn crawl mỗi keyword (vd. 2)"
+                        className="w-full bg-white border border-stone-200 px-4 py-3 text-[11px] font-mono focus:border-[#ff4d00] focus:ring-1 focus:ring-[#ff4d00] outline-none"
+                      />
+                    </div>
+
+                    {/* Keywords manager */}
+                    <div className="flex flex-col gap-2 p-4 bg-white border border-stone-200">
+                      <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+                        <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[14px] text-stone-400">tag</span>
+                          Hashtags & Search Keywords ({keywords.length})
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleResetKeywords}
+                          className="text-[9px] font-mono font-bold text-stone-400 hover:text-[#ff4d00] uppercase tracking-wider"
+                        >
+                          Reset to defaults
+                        </button>
+                      </div>
+
+                      {/* Keyword input — comma-separated free text */}
+                      <form onSubmit={(e: React.FormEvent) => e.preventDefault()} className="flex gap-1.5 mt-2">
+                        <input
+                          ref={keywordInputRef}
+                          type="text"
+                          value={newKeywordInput}
+                          onChange={(e) => setNewKeywordInput(e.target.value)}
+                          placeholder="Nhập keywords hoặc #hashtags, cách nhau bằng dấu phẩy"
+                          className="flex-grow bg-stone-50 border border-stone-200 px-3 py-1.5 text-[11px] font-mono focus:border-[#ff4d00] outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setNewKeywordInput("")}
+                          className="px-3 bg-stone-100 hover:bg-stone-200 text-stone-600 font-mono text-[11px] font-bold uppercase transition-all border border-stone-200 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </form>
+
+                      {/* Suggested hashtags — click to select/deselect */}
+                      <div className="mt-1 pb-0.5">
+                        <span className="text-[9px] font-mono text-stone-400 font-bold uppercase tracking-wider block mb-1.5">
+                          Suggested (click to select/deselect):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getRecommendedTags().map((tag) => {
+                            const isSelected = keywords.includes(tag);
+                            return (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => handleSelectSuggestedTag(tag)}
+                                className={`px-2 py-0.5 text-[9.5px] font-mono transition-all border cursor-pointer ${
+                                  isSelected
+                                    ? "bg-stone-900 text-white border-stone-900"
+                                    : "bg-stone-50 hover:bg-stone-100 text-stone-600 border-stone-200 hover:border-stone-300"
+                                }`}
+                                title={isSelected ? "Click to deselect" : "Click to select"}
+                              >
+                                {tag}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Virality Toggle */}
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">
+                        Engagement / Popularity level
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsViral(!isViral)}
+                        className={`flex items-center justify-between px-4 py-3 border transition-all text-left w-full cursor-pointer ${
+                          isViral
+                            ? "bg-[#ff4d00]/5 border-[#ff4d00] text-[#ff4d00]"
+                            : "bg-white border-stone-200 text-stone-700 hover:bg-stone-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="material-symbols-outlined text-[18px]">
+                            {isViral ? "local_fire_department" : "trending_flat"}
+                          </span>
+                          <div>
+                            <p className="text-[11px] uppercase font-bold tracking-wider">Include viral signals</p>
+                            <p className="text-[9.5px] text-stone-400 font-serif italic mt-0.5">
+                              {isViral ? "Collect discussions with very high engagement" : "Standard engagement mode"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors duration-300 shrink-0 ${isViral ? "bg-[#ff4d00]" : "bg-stone-300"}`}>
+                          <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isViral ? "translate-x-5" : "translate-x-0"}`} />
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
- {/* Social Explore Results Box - Action Banner */}
-          {socialResultsText && (
-            <div className="mt-2 border-t border-stone-200 pt-6 animate-fadeIn">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#ff4d00]/5 p-4 border border-[#ff4d00]/20">
-                <div className="flex items-start gap-2.5">
-                  <span className="material-symbols-outlined text-[#ff4d00] text-[20px] mt-0.5">check_circle</span>
-                  <div>
-                    <h4 className="text-[11px] font-bold text-stone-900 uppercase tracking-wider font-mono">
-                      Social data crawled successfully!
-                    </h4>
-                    <p className="text-[10px] text-stone-500 font-serif italic mt-0.5 max-w-md">
-                      Raw crawled posts are listed below — open the sheet to review, or run Intent Discovery to extract intents.
-                    </p>
-                  </div>
+
+          {/* Shared action footer: both run buttons */}
+          <div className="border-t border-stone-100 pt-6 flex flex-col sm:flex-row gap-4">
+            {/* Discovery group: scope toggle + Run button (single button, scope-aware) */}
+            <div className="flex-1 flex flex-col gap-2">
+              {/* Scope toggle — picks which flow(s) discovery acts on */}
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-stone-400 uppercase tracking-[0.2em] shrink-0">Scope</span>
+                <div className="flex border border-stone-200 rounded-none overflow-hidden">
+                  {([
+                    { id: "data", label: "Data", enabled: true },
+                    { id: "prd", label: "PRD", enabled: prdAvailable },
+                    { id: "both", label: "Data + PRD", enabled: prdAvailable },
+                  ] as const).map((opt) => {
+                    const active = discoveryScope === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={!opt.enabled}
+                        onClick={() => setDiscoveryScope(opt.id)}
+                        title={!opt.enabled ? "Upload a PRD to enable this scope" : `Discover from ${opt.label}`}
+                        className={`px-3 py-1.5 text-[9px] font-mono font-bold uppercase tracking-wider border-r border-stone-200 last:border-r-0 transition-colors ${
+                          active
+                            ? "bg-[#ff4d00] text-white"
+                            : opt.enabled
+                              ? "bg-white text-stone-600 hover:bg-stone-50 cursor-pointer"
+                              : "bg-stone-50 text-stone-300 cursor-not-allowed"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
+              </div>
+
+              {/* Run Intent Discovery (scope-aware) */}
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 px-8 py-3.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+              >
+                {loading ? (
+                  <>
+                    <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
+                    Ingesting & Discovering Intents...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">search_check</span>
+                    Run Intent Discovery · {discoveryScope === "data" ? "Data" : discoveryScope === "prd" ? "PRD" : "Data + PRD"}
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Crawl group: [Crawl Social Data] [View Results] on same row + success message below */}
+            <div className="flex-1 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCrawlSubmit}
+                  disabled={socialLoading}
+                  className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-stone-900 text-white hover:bg-stone-850 rounded-none font-bold text-[10px] uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+                >
+                  {socialLoading ? (
+                    <>
+                      <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
+                      Crawling...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[16px]">travel_explore</span>
+                      Crawl Social Data
+                    </>
+                  )}
+                </button>
+
+                {crawledPosts.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setIsSheetModalOpen(true)}
-                    className="px-4 py-2 bg-stone-900 hover:bg-stone-850 text-white font-mono text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5 rounded-none border-0 cursor-pointer shadow-xs transition-colors"
+                    className="flex items-center gap-1.5 px-4 py-3.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-mono text-[10px] uppercase font-bold tracking-wider rounded-none border border-stone-200 cursor-pointer transition-colors shrink-0"
                   >
                     <span className="material-symbols-outlined text-[14px]">table_chart</span>
-                    View results (Sheet)
+                    View Results
                   </button>
-                </div>
+                )}
               </div>
-            </div>
-          )}
-          {/* Shared action footer: both run buttons */}
-          <div className="border-t border-stone-100 pt-6 flex flex-col sm:flex-row gap-4">
-            {/* Run Intent Discovery (from uploaded/pasted sources) */}
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
-            >
-              {loading ? (
-                <>
-                  <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                  Ingesting & Discovering Intents...
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[16px]">search_check</span>
-                  Run Intent Discovery
-                </>
-              )}
-            </button>
 
-              
-            {/* Crawl Social Data (raw crawl → results sheet; no intent extraction) */}
-            <button
-              onClick={handleCrawlSubmit}
-              disabled={socialLoading}
-              className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-stone-900 text-white hover:bg-stone-850 rounded-none font-bold text-[10px] uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
-            >
-              {socialLoading ? (
-                <>
-                  <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                  Crawling Social Data...
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[16px]">travel_explore</span>
-                  Crawl Social Data
-                </>
+              {socialResultsText && (
+                <p className="flex items-center gap-1.5 text-[10px] font-mono text-stone-500 animate-fadeIn">
+                  <span className="material-symbols-outlined text-[13px] text-emerald-500">check_circle</span>
+                  {socialResultsText}
+                </p>
               )}
-            </button>
+            </div>
           </div>
 
           {/* Social Explore Results Box - raw log version (commented out, kept for reference) */}
@@ -897,7 +1034,7 @@ export default function DataIngestionTab({
                                     type="button"
                                     onClick={() => {
                                       navigator.clipboard.writeText(post.url);
-                                      alert("Link copied!");
+                                      onToast?.("Link copied!", "success");
                                     }}
                                     className="text-stone-400 hover:text-[#ff4d00] transition-colors p-0.5 hover:bg-stone-100 rounded-sm cursor-pointer border-0 bg-transparent"
                                     title="Copy Link"
@@ -983,7 +1120,7 @@ export default function DataIngestionTab({
                       URL.revokeObjectURL(url);
                     } catch (err) {
                       console.error("Download failed:", err);
-                      alert("Failed to download crawl data.");
+                      onToast?.("Failed to download crawl data.", "error");
                     }
                   }}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-700 text-[10px] uppercase font-bold tracking-widest cursor-pointer transition-colors"

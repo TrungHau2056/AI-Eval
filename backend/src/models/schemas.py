@@ -22,6 +22,7 @@ class FEIntent(BaseModel):
     source: str = "data"  # data | prd
     coverage: str = ""  # confirmed | prd_only | data_only | "" (standalone)
     matchedIds: list[str] = Field(default_factory=list)
+    sourcePosts: list[dict] = Field(default_factory=list)
 
 
 class FEPersona(BaseModel):
@@ -127,10 +128,15 @@ class PipelineState(BaseModel):
     # Frontend-facing state
     api_key: str = ""
     domain: str = "qa-env-01.local"
-    ai_model: str = "gemini"
+    ai_model: str = ""
     intents: list[FEIntent] = Field(default_factory=list)
     personas: list[FEPersona] = Field(default_factory=list)
     test_cases: list[FETestCase] = Field(default_factory=list)
+    # Separate intent pools — PRD replaces on re-extract, data appends on each crawl/discover
+    prd_intents: list[FEIntent] = Field(default_factory=list)
+    data_intents: list[FEIntent] = Field(default_factory=list)
+    prd_content_hash: str = ""
+    cached_prd_internal: list[Intent] = Field(default_factory=list)
     # Internal pipeline state (used to pass rich data between pipeline stages)
     internal_intents: list[Intent] = Field(default_factory=list)
     internal_personas: list[Persona] = Field(default_factory=list)

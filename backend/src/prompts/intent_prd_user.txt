@@ -1,0 +1,22 @@
+Đây là tài liệu PRD cần phân tích:
+
+---
+{raw_text}
+---
+
+NHIỆM VỤ BẮT BUỘC — thực hiện ĐẦY ĐỦ CẢ HAI PHẦN, không được bỏ phần nào:
+
+**PHẦN 1 — TRÍCH XUẤT (source: "prd"):**
+Liệt kê TOÀN BỘ intent người dùng có bằng chứng trực tiếp trong PRD. Mỗi feature/user story/AC phải ra ít nhất 1 intent. Đặt `source: "prd"`.
+
+**PHẦN 2 — KHAI PHÁ GAP (source: "prd_inferred"):**
+Sau khi xong Phần 1, bắt buộc sinh THÊM ít nhất 3 gap intent mà PRD chưa đề cập, dùng 5 góc nhìn:
+1. Trước khi dùng feature (setup, điều kiện tiên quyết)
+2. Sau khi dùng feature (xác nhận, lịch sử, hoàn tác)
+3. Khi xảy ra lỗi (error recovery, edge cases)
+4. CRUD liền kề bị thiếu (có "đặt" → cần "hủy", "sửa", "xem lại")
+5. Phase bị trống trong hành trình người dùng
+
+Với mỗi gap intent: điền `source: "prd_inferred"` và giải thích `gap_reasoning` tại sao PRD bỏ qua.
+
+Trả về JSON duy nhất theo schema đã quy định, KHÔNG thêm text nào khác.

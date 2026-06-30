@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 
 from src.api.deps import get_memory, get_state, reset_state
 from src.crawlers.crawl_persist import sync_social_content_to_state
+from src.crawlers.crawl_store import load_posts as load_crawl_posts
 from src.config import settings
 from src.ingestion.loader_factory import get_loader
 from src.ingestion.normalizer import merge_sources
@@ -26,6 +28,7 @@ from src.models.schemas import (
 )
 from src.pipeline.intent_comparator import IntentComparator
 from src.pipeline.intent_extractor import IntentAgent
+from src.prompts.loader import INTENT_PRD_SYSTEM, INTENT_PRD_USER
 from src.pipeline.persona_generator import PersonaAgent
 from src.pipeline.test_prompt_generator import TestCaseAgent
 
@@ -40,6 +43,7 @@ router = APIRouter(tags=["frontend-api"])
 class DiscoverRequest(BaseModel):
     logsText: str = ""
     ruleText: str = ""
+    scope: str = "both"  # "data" | "prd" | "both"
 
 
 class GeneratePersonasRequest(BaseModel):
@@ -121,6 +125,28 @@ def _get_model() -> str:
     return preferred
 
 
+def _attribute_source_posts(data_intents: list[dict]) -> None:
+    """Mutate mỗi data intent: thêm source_posts từ crawl_posts.json qua substring match."""
+    all_posts = load_crawl_posts()
+    if not all_posts:
+        return
+    for intent in data_intents:
+        raw_obs = (intent.get("raw_observation") or "").strip().lower()
+        utterance = (intent.get("utterance") or "").strip().lower()
+        matched = []
+        for post in all_posts:
+            text = (post.get("text") or "").lower()
+            if (raw_obs and len(raw_obs) > 10 and raw_obs in text) or \
+               (utterance and len(utterance) > 8 and utterance in text):
+                matched.append({
+                    "url": post.get("url", ""),
+                    "username": post.get("username", ""),
+                    "platform": post.get("platform", ""),
+                    "textExcerpt": (post.get("text") or "")[:250],
+                })
+        intent["source_posts"] = matched[:3]
+
+
 def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
     mapped = []
     for r in results:
@@ -131,9 +157,10 @@ def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
             utterance=r.get("utterance", ""),
             triggerMoment=r.get("moment", r.get("context", "")),
             selected=True,
-            source=r.get("source") if r.get("source") in ("data", "prd") else "data",
+            source=r.get("source") if r.get("source") in ("data", "prd", "prd_inferred") else "data",
             coverage=r.get("coverage", ""),
             matchedIds=r.get("matchedIds", []) or [],
+            sourcePosts=r.get("source_posts") or [],
         ))
     return mapped
 
@@ -200,6 +227,7 @@ def get_state_endpoint():
         "intents": [i.model_dump() for i in state.intents],
         "personas": [p.model_dump() for p in state.personas],
         "testCases": [tc.model_dump() for tc in state.test_cases],
+        "prdLoaded": bool(state.raw_prd_content.strip()),
     }
 
 
@@ -313,6 +341,44 @@ async def _mine_intents(content: str, guidance: str, llm, memory_name: str, trac
     return await agent.run(RawInput(source_type="text", content=content), guidance, trace_id=trace_id)
 
 
+async def _mine_prd_intents(content: str, llm, memory_name: str, trace_id: str | None = None) -> list[dict]:
+    agent = IntentAgent(llm, memory=get_memory(memory_name), max_chunk_tokens=settings.chunk_max_tokens, system_prompt=INTENT_PRD_SYSTEM, user_template=INTENT_PRD_USER)
+    logger.info("_mine_prd_intents | user_template_preview=%s", INTENT_PRD_USER[:60].replace('\n', ' '))
+    return await agent.run(RawInput(source_type="text", content=content), "", trace_id=trace_id)
+
+
+def _replace_pool(old_pool: list[FEIntent], new_pool: list[FEIntent]) -> list[FEIntent]:
+    """Thay toàn bộ pool (dùng cho PRD), giữ selected/phase/id cho intent trùng tên."""
+    old_map = {i.name.lower().strip(): i for i in old_pool}
+    result = []
+    for intent in new_pool:
+        key = intent.name.lower().strip()
+        if key in old_map:
+            old = old_map[key]
+            intent = intent.model_copy(update={"selected": old.selected, "phase": old.phase, "id": old.id})
+        result.append(intent)
+    return result
+
+
+def _append_pool(old_pool: list[FEIntent], new_pool: list[FEIntent]) -> list[FEIntent]:
+    """Append vào pool (dùng cho data/crawl): cập nhật coverage cho intent đã có, thêm intent mới vào cuối."""
+    old_map = {i.name.lower().strip(): i for i in old_pool}
+    result = []
+    # Giữ existing, cập nhật coverage/matchedIds từ run mới nếu có
+    for old_intent in old_pool:
+        key = old_intent.name.lower().strip()
+        matching = next((i for i in new_pool if i.name.lower().strip() == key), None)
+        if matching:
+            result.append(matching.model_copy(update={"selected": old_intent.selected, "phase": old_intent.phase, "id": old_intent.id}))
+        else:
+            result.append(old_intent)
+    # Thêm intent hoàn toàn mới
+    for intent in new_pool:
+        if intent.name.lower().strip() not in old_map:
+            result.append(intent)
+    return result
+
+
 @router.post("/api/discover")
 def discover_intents(req: DiscoverRequest):
     logger.info("POST /api/discover | logsText_length=%d | ruleText=%s", len(req.logsText), bool(req.ruleText))
@@ -335,6 +401,20 @@ def discover_intents(req: DiscoverRequest):
     data_content = "\n\n".join(p for p in parts if p and p.strip())
 
     prd_content = state.raw_prd_content
+
+    # Scope: tách 2 luồng discovery (Data / PRD) — chỉ chạy đúng luồng user chọn.
+    scope = req.scope if req.scope in ("data", "prd", "both") else "both"
+    run_data = scope in ("data", "both")
+    run_prd = scope in ("prd", "both")
+    run_compare = scope == "both"
+
+    if scope == "data" and not data_content.strip():
+        raise HTTPException(
+            400,
+            "No crawl/data found. Crawl social data, upload a file, or paste text first.",
+        )
+    if scope == "prd" and not prd_content.strip():
+        raise HTTPException(400, "No PRD loaded. Upload a PRD first.")
     if not data_content.strip() and not prd_content.strip():
         raise HTTPException(
             400,
@@ -357,21 +437,32 @@ def discover_intents(req: DiscoverRequest):
         logger.error("Failed to create LLM client: %s", e)
         raise HTTPException(400, str(e))
 
+    prd_hash = hashlib.md5(prd_content.encode()).hexdigest() if prd_content.strip() else ""
+    prd_changed = prd_hash != state.prd_content_hash
+
     async def _run() -> tuple[list[dict], list[dict]]:
         data_intents: list[dict] = []
         prd_intents: list[dict] = []
-        if data_content.strip():
+        if run_data and data_content.strip():
             data_intents = await _mine_intents(data_content, guidance, llm, "intent", trace_id=state.trace_id)
-        if prd_content.strip():
-            prd_intents = await _mine_intents(prd_content, "", llm, "intent_prd", trace_id=state.trace_id)
-        if data_intents or prd_intents:
+            _attribute_source_posts(data_intents)
+        if run_prd and prd_content.strip():
+            if prd_changed or not state.cached_prd_internal:
+                logger.info("PRD changed or no cache — re-extracting PRD intents")
+                prd_intents = await _mine_prd_intents(prd_content, llm, "intent_prd", trace_id=state.trace_id)
+                state.cached_prd_internal = [Intent(**r) for r in prd_intents]
+                state.prd_content_hash = prd_hash
+            else:
+                logger.info("PRD unchanged — using cached PRD intents (count=%d)", len(state.cached_prd_internal))
+                prd_intents = [i.model_dump() for i in state.cached_prd_internal]
+        if run_compare and (data_intents or prd_intents):
             comparator = IntentComparator(llm, api_key)
             prd_intents, data_intents = await comparator.compare(prd_intents, data_intents)
         return data_intents, prd_intents
 
     loop = asyncio.new_event_loop()
     try:
-        logger.info("Starting discovery (data + prd + comparator) ...")
+        logger.info("Starting discovery | scope=%s ...", scope)
         data_intents, prd_intents = loop.run_until_complete(_run())
     except Exception as e:
         logger.error("Discovery failed: %s", e, exc_info=True)
@@ -380,12 +471,18 @@ def discover_intents(req: DiscoverRequest):
         loop.close()
         flush_langfuse()
 
-    results = data_intents + prd_intents
-    fe_intents = _map_pipeline_intents_to_fe(results)
-    state.intents = fe_intents
-    state.internal_intents = [Intent(**r) for r in results]
-    logger.info("Stored %d FE intents (data=%d, prd=%d)", len(fe_intents), len(data_intents), len(prd_intents))
-    if not fe_intents:
+    new_prd_fe = _map_pipeline_intents_to_fe(prd_intents)
+    new_data_fe = _map_pipeline_intents_to_fe(data_intents)
+
+    if new_prd_fe:
+        state.prd_intents = _replace_pool(state.prd_intents, new_prd_fe)
+    if new_data_fe:
+        state.data_intents = _append_pool(state.data_intents, new_data_fe)
+
+    state.intents = state.prd_intents + state.data_intents
+    state.internal_intents = [Intent(**r) for r in prd_intents + data_intents]
+    logger.info("Stored %d FE intents (data=%d, prd=%d)", len(state.intents), len(data_intents), len(prd_intents))
+    if not state.intents:
         logger.warning(
             "Discovery returned 0 intents | data_chars=%d | prd_chars=%d | social_chars=%d",
             len(data_content),
@@ -393,7 +490,7 @@ def discover_intents(req: DiscoverRequest):
             len(state.raw_social_content or ""),
         )
 
-    return {"intents": [i.model_dump() for i in fe_intents], "fallback": False}
+    return {"intents": [i.model_dump() for i in state.intents], "fallback": False}
 
 
 @router.post("/api/generate-personas")
