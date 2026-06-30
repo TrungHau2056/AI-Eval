@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Intent, Persona } from "../types";
 import AutoTextarea from "./AutoTextarea";
+import { downloadPersonasJson, downloadPersonasCsv } from "../utils/exportPersonas";
 
 interface PersonaPlaygroundTabProps {
   intents: Intent[];
@@ -284,6 +285,24 @@ export default function PersonaPlaygroundTab({
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => downloadPersonasJson(personas)}
+            disabled={personas.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 text-stone-700 bg-white border border-stone-300 rounded-none font-bold text-[11px] uppercase tracking-wider hover:bg-stone-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">data_object</span>
+            Export JSON
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadPersonasCsv(personas, intents)}
+            disabled={personas.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 text-stone-700 bg-white border border-stone-300 rounded-none font-bold text-[11px] uppercase tracking-wider hover:bg-stone-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">download</span>
+            Export CSV
+          </button>
           <select
             value={selectedIntentId}
             onChange={(e) => setSelectedIntentId(e.target.value)}

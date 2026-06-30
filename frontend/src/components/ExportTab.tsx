@@ -7,15 +7,13 @@ interface ExportTabProps {
   onUpdateTestCase: (id: string, updated: Partial<TestCase>) => void;
   onRunTest: () => void;
   onOpenLogs: (tc: TestCase) => void;
-  onOpenRuleModal: () => void;
 }
 
 export default function ExportTab({
   testCases,
   onUpdateTestCase,
   onRunTest,
-  onOpenLogs,
-  onOpenRuleModal
+  onOpenLogs
 }: ExportTabProps) {
   const [search, setSearch] = useState("");
 
@@ -91,24 +89,6 @@ export default function ExportTab({
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
-      
-      {/* Synchronized Generation Rule Banner action */}
-      <div className="flex justify-between items-center bg-white border border-stone-200 px-6 py-4 rounded-none shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-[#ff4d00]/80 text-[18px]">settings_suggest</span>
-          <span className="text-[10px] font-mono tracking-widest uppercase font-bold text-stone-500">
-            Active Generation Rules Suite — All Pipelines Synchronized
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onOpenRuleModal}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-stone-300 hover:border-[#ff4d00] hover:text-[#ff4d00] font-mono text-[10.5px] uppercase font-bold tracking-widest transition-all cursor-pointer shadow-xs shrink-0"
-        >
-          <span className="material-symbols-outlined text-[16px]">tune</span>
-          Configure Generation Rules
-        </button>
-      </div>
 
       {/* Main Table Card Area */}
       <div className="bg-white border border-stone-200 rounded-none shadow-sm overflow-hidden flex flex-col h-[calc(100vh-290px)]">

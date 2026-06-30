@@ -661,12 +661,6 @@ export default function App() {
                 onUpdateTestCase={handleUpdateTestCase}
                 onRunTest={triggerPipelineRun}
                 onOpenLogs={handleOpenStaticLogs}
-                onOpenRuleModal={() => {
-                  setActiveRuleType("testcase");
-                  setPromptText("");
-                  setMdFileName(null);
-                  setIsRuleModalOpen(true);
-                }}
               />
             )}
           </main>
