@@ -129,10 +129,9 @@ export default function DataIngestionTab({
   const [newKeywordInput, setNewKeywordInput] = useState("");
   const keywordInputRef = useRef<HTMLInputElement>(null);
   const keywords = newKeywordInput.split(",").map((k) => k.trim()).filter(Boolean);
-  const [isViral, setIsViral] = useState(true);
   const [showCrawlSettings, setShowCrawlSettings] = useState(false);
-  // Posts to crawl per keyword (shared across all platforms). No default — user must enter.
-  const [postsPerKeyword, setPostsPerKeyword] = useState<string>("");
+  // Posts to crawl per keyword (shared across all platforms). Fixed at 1; input is hidden.
+  const postsPerKeyword = "1";
 
   // Toggle a platform in the multi-select list.
   const handleTogglePlatform = (p: string) => {
@@ -712,7 +711,7 @@ export default function DataIngestionTab({
                     <div>
                       <span className="text-[11px] uppercase font-bold tracking-wider text-stone-800">Crawl Settings</span>
                       <p className="text-[9.5px] text-stone-400 font-serif italic mt-0.5">
-                        {postsPerKeyword || "?"} posts/keyword · {keywords.length} keywords · viral {isViral ? "on" : "off"}
+                        {postsPerKeyword || "?"} posts/keyword · {keywords.length} keywords
                       </p>
                     </div>
                   </div>
@@ -723,23 +722,6 @@ export default function DataIngestionTab({
 
                 {showCrawlSettings && (
                   <div className="flex flex-col gap-6 mt-2 animate-fadeIn">
-                    {/* Posts per keyword (shared across all platforms) */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em] flex justify-between items-center">
-                        <span>Posts mỗi keyword (mọi nền tảng)</span>
-                        <span className="font-mono text-[9px] text-stone-400 normal-case tracking-normal">áp dụng cho từng keyword</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={postsPerKeyword}
-                        onChange={(e) => setPostsPerKeyword(e.target.value)}
-                        placeholder="Nhập số posts muốn crawl mỗi keyword (vd. 2)"
-                        className="w-full bg-white border border-stone-200 px-4 py-3 text-[11px] font-mono focus:border-[#ff4d00] focus:ring-1 focus:ring-[#ff4d00] outline-none"
-                      />
-                    </div>
-
                     {/* Keywords manager */}
                     <div className="flex flex-col gap-2 p-4 bg-white border border-stone-200">
                       <div className="flex items-center justify-between border-b border-stone-100 pb-2">
@@ -801,37 +783,6 @@ export default function DataIngestionTab({
                           })}
                         </div>
                       </div>
-                    </div>
-
-                    {/* Virality Toggle */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-[10px] font-bold text-stone-500 uppercase tracking-[0.2em]">
-                        Engagement / Popularity level
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsViral(!isViral)}
-                        className={`flex items-center justify-between px-4 py-3 border transition-all text-left w-full cursor-pointer ${
-                          isViral
-                            ? "bg-[#ff4d00]/5 border-[#ff4d00] text-[#ff4d00]"
-                            : "bg-white border-stone-200 text-stone-700 hover:bg-stone-50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="material-symbols-outlined text-[18px]">
-                            {isViral ? "local_fire_department" : "trending_flat"}
-                          </span>
-                          <div>
-                            <p className="text-[11px] uppercase font-bold tracking-wider">Include viral signals</p>
-                            <p className="text-[9.5px] text-stone-400 font-serif italic mt-0.5">
-                              {isViral ? "Collect discussions with very high engagement" : "Standard engagement mode"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors duration-300 shrink-0 ${isViral ? "bg-[#ff4d00]" : "bg-stone-300"}`}>
-                          <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isViral ? "translate-x-5" : "translate-x-0"}`} />
-                        </div>
-                      </button>
                     </div>
                   </div>
                 )}
