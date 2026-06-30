@@ -58,6 +58,33 @@ export default function IntentCurationTab({
   const prdCount = intents.filter((i) => i.source === 'prd' || i.source === 'prd_inferred').length;
   const dataCount = intents.filter((i) => i.source === 'data').length;
 
+  // Lookup by id so PRD intents confirmed against a data intent (via matchedIds) can
+  // surface that data intent's source posts even though PRD intents carry none of their own.
+  const intentById = React.useMemo(() => {
+    const map = new Map<string, Intent>();
+    for (const it of intents) map.set(it.id, it);
+    return map;
+  }, [intents]);
+
+  const getEffectiveSourcePosts = (item: Intent): SourcePost[] => {
+    if (item.sourcePosts && item.sourcePosts.length > 0) return item.sourcePosts;
+    if (!item.matchedIds || item.matchedIds.length === 0) return [];
+    const seen = new Set<string>();
+    const posts: SourcePost[] = [];
+    for (const mid of item.matchedIds) {
+      const matched = intentById.get(mid);
+      for (const p of matched?.sourcePosts ?? []) {
+        const key = p.url || p.textExcerpt;
+        if (!seen.has(key)) {
+          seen.add(key);
+          posts.push(p);
+          if (posts.length >= 3) return posts;
+        }
+      }
+    }
+    return posts;
+  };
+
   const sortBySource = (list: Intent[]) =>
     [...list].sort((a, b) => {
       const order = { prd: 0, prd_inferred: 1, data: 2 };
@@ -214,7 +241,7 @@ export default function IntentCurationTab({
               <th className="px-4 py-3 w-[130px]">Phase</th>
               <th className="px-4 py-3">Utterance (Typical User Ask)</th>
               <th className="px-4 py-3 w-[230px]">Trigger Moment</th>
-              <th className="px-4 py-3 w-[80px] text-center">Sources</th>
+              <th className="px-4 py-3 w-[80px] text-center">Post</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 text-stone-700">
@@ -225,7 +252,9 @@ export default function IntentCurationTab({
                 </td>
               </tr>
             ) : (
-              visibleIntents.map((item) => (
+              visibleIntents.map((item) => {
+                const effectivePosts = getEffectiveSourcePosts(item);
+                return (
                 <React.Fragment key={item.id}>
                 <tr
                   className={`group transition-colors ${
@@ -315,9 +344,9 @@ export default function IntentCurationTab({
                     />
                   </td>
 
-                  {/* Sources cell — only for data intents */}
+                  {/* Post cell — opens the source post(s) this intent was derived/confirmed from */}
                   <td className="px-4 py-2 text-center">
-                    {item.source === "data" && (item.sourcePosts?.length ?? 0) > 0 && (
+                    {effectivePosts.length > 0 && (
                       <button
                         onClick={() => setExpandedSourceId(expandedSourceId === item.id ? null : item.id)}
                         className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-none border transition-colors cursor-pointer ${
@@ -327,21 +356,21 @@ export default function IntentCurationTab({
                         }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full ${expandedSourceId === item.id ? "bg-white" : "bg-emerald-500"}`} />
-                        {item.sourcePosts!.length}
+                        {effectivePosts.length}
                       </button>
                     )}
                   </td>
                 </tr>
 
                 {/* Expandable source posts row */}
-                {expandedSourceId === item.id && (item.sourcePosts?.length ?? 0) > 0 && (
+                {expandedSourceId === item.id && effectivePosts.length > 0 && (
                   <tr key={`${item.id}-sources`} className="bg-emerald-50/40">
                     <td colSpan={8} className="px-8 py-3">
                       <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-700 mb-2">
-                        Source Posts ({item.sourcePosts!.length})
+                        Source Posts ({effectivePosts.length})
                       </p>
                       <div className="space-y-2">
-                        {item.sourcePosts!.map((post: SourcePost, idx: number) => (
+                        {effectivePosts.map((post: SourcePost, idx: number) => (
                           <div key={idx} className="flex items-start gap-3 bg-white border border-emerald-100 rounded-none p-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -373,7 +402,8 @@ export default function IntentCurationTab({
                   </tr>
                 )}
                 </React.Fragment>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
