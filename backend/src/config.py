@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Gap analysis / IntentComparator
     embedding_model: str = "models/gemini-embedding-001"
+    openai_embedding_model: str = "text-embedding-3-small"
     match_high: float = 0.85  # sim >= high → auto match
     match_low: float = 0.55  # sim <= low → auto khác; ở giữa → LLM chấm
 

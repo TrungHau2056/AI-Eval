@@ -17,6 +17,10 @@ export interface Intent {
   coverage?: '' | 'confirmed' | 'prd_only' | 'data_only';
   matchedIds?: string[];
   sourcePosts?: SourcePost[];
+  prdSource?: string; // verbatim PRD excerpt (raw_observation) for prd-explicit intents
+  // Merge-aware: a merged intent carries multiple source labels + multiple PRD quotes.
+  sources?: string[]; // e.g. ["prd","data"] | ["prd_inferred"] | ["data"]
+  prdSources?: string[]; // up to 3 verbatim PRD excerpts
 }
 
 export interface IngestSource {

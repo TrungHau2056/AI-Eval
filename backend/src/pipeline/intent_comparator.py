@@ -15,8 +15,21 @@ from src.llm.base import LLMClient
 logger = logging.getLogger(__name__)
 
 
-def embed(texts: list[str], api_key: str, model: str = "") -> np.ndarray:
-    """Embed list text bằng Gemini text-embedding-004. Trả ma trận (n, dim)."""
+def embed(texts: list[str], api_key: str, model: str = "", provider: str = "gemini") -> np.ndarray:
+    """Embed list text. Trả ma trận (n, dim). provider ∈ {gemini, openai}.
+
+    Cùng provider+model cho cả 2 phía → cùng số chiều → cosine hợp lệ.
+    """
+    if provider == "openai":
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = model or settings.openai_embedding_model
+        # OpenAI embeddings nhận cả list trong 1 call.
+        resp = client.embeddings.create(model=model, input=[t or " " for t in texts])
+        vectors = [d.embedding for d in resp.data]
+        return np.array(vectors, dtype=float)
+
     import google.generativeai as genai
 
     genai.configure(api_key=api_key)
@@ -59,10 +72,13 @@ class IntentComparator:
         embedding_model: str = "",
         high: float | None = None,
         low: float | None = None,
+        provider: str = "gemini",
     ):
         self.llm = llm
         self.api_key = api_key
-        self.embedding_model = embedding_model or settings.embedding_model
+        self.provider = provider
+        default_embed = settings.openai_embedding_model if provider == "openai" else settings.embedding_model
+        self.embedding_model = embedding_model or default_embed
         self.high = settings.match_high if high is None else high
         self.low = settings.match_low if low is None else low
 
@@ -85,8 +101,8 @@ class IntentComparator:
             return self._no_comparison(prd_intents, data_intents)
 
         try:
-            prd_vecs = embed([_intent_text(i) for i in prd_intents], self.api_key, self.embedding_model)
-            data_vecs = embed([_intent_text(i) for i in data_intents], self.api_key, self.embedding_model)
+            prd_vecs = embed([_intent_text(i) for i in prd_intents], self.api_key, self.embedding_model, self.provider)
+            data_vecs = embed([_intent_text(i) for i in data_intents], self.api_key, self.embedding_model, self.provider)
             sim = _cosine_matrix(prd_vecs, data_vecs)
 
             matched = np.zeros_like(sim, dtype=bool)

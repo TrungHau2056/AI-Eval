@@ -34,17 +34,17 @@ export default function IntentCurationTab({
   };
 
   const getPhaseStyle = (phase: string) => {
-    if (!phase) return "bg-stone-100 text-stone-600 border border-stone-200/50";
+    if (!phase) return "text-stone-600";
     const hash = phase.toLowerCase().split("").reduce((a, c) => a + c.charCodeAt(0), 0);
     const styles = [
-      "bg-orange-100 text-orange-800 border border-orange-200/50",
-      "bg-blue-100 text-blue-800 border border-blue-200/30",
-      "bg-rose-100 text-rose-800 border border-rose-200/30",
-      "bg-emerald-100 text-emerald-800 border border-emerald-200/30",
-      "bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/30",
-      "bg-amber-100 text-amber-800 border border-amber-200/30",
-      "bg-cyan-100 text-cyan-800 border border-cyan-200/30",
-      "bg-violet-100 text-violet-800 border border-violet-200/30",
+      "text-orange-800",
+      "text-blue-800",
+      "text-rose-800",
+      "text-emerald-800",
+      "text-fuchsia-800",
+      "text-amber-800",
+      "text-cyan-800",
+      "text-violet-800",
     ];
     return styles[hash % styles.length];
   };
@@ -55,48 +55,41 @@ export default function IntentCurationTab({
 
   const selectedCount = intents.filter((i) => i.selected).length;
   const hasCoverage = intents.some((i) => i.coverage);
-  const prdCount = intents.filter((i) => i.source === 'prd' || i.source === 'prd_inferred').length;
-  const dataCount = intents.filter((i) => i.source === 'data').length;
+  // Source labels: a merged intent carries several (e.g. ["prd","data"]). Fallback to the
+  // legacy single `source` for manually-added intents that have no `sources`.
+  const getSources = (item: Intent): string[] =>
+    item.sources && item.sources.length > 0 ? item.sources : item.source ? [item.source] : [];
+  const hasPrd = (item: Intent) => getSources(item).some((s) => s === 'prd' || s === 'prd_inferred');
+  const hasData = (item: Intent) => getSources(item).includes('data');
 
-  // Lookup by id so PRD intents confirmed against a data intent (via matchedIds) can
-  // surface that data intent's source posts even though PRD intents carry none of their own.
-  const intentById = React.useMemo(() => {
-    const map = new Map<string, Intent>();
-    for (const it of intents) map.set(it.id, it);
-    return map;
-  }, [intents]);
+  const prdCount = intents.filter(hasPrd).length;
+  const dataCount = intents.filter(hasData).length;
 
-  const getEffectiveSourcePosts = (item: Intent): SourcePost[] => {
-    if (item.sourcePosts && item.sourcePosts.length > 0) return item.sourcePosts;
-    if (!item.matchedIds || item.matchedIds.length === 0) return [];
-    const seen = new Set<string>();
-    const posts: SourcePost[] = [];
-    for (const mid of item.matchedIds) {
-      const matched = intentById.get(mid);
-      for (const p of matched?.sourcePosts ?? []) {
-        const key = p.url || p.textExcerpt;
-        if (!seen.has(key)) {
-          seen.add(key);
-          posts.push(p);
-          if (posts.length >= 3) return posts;
-        }
-      }
-    }
-    return posts;
+  // BE đã gộp sẵn — FE đọc thẳng cite, không còn mượn qua matchedIds.
+  const getSourcePosts = (item: Intent): SourcePost[] => item.sourcePosts ?? [];
+  const getPrdSources = (item: Intent): string[] =>
+    item.prdSources && item.prdSources.length > 0 ? item.prdSources : item.prdSource ? [item.prdSource] : [];
+
+  // CITE count = số source post + số trích dẫn PRD.
+  const getCitationCount = (item: Intent): number =>
+    getSourcePosts(item).length + getPrdSources(item).length;
+
+  // Rank: cụm có PRD (gồm cả merged prd+data) lên trước, prd_inferred kế, data sau cùng.
+  const sourceRank = (item: Intent): number => {
+    const s = getSources(item);
+    if (s.includes('prd')) return 0;
+    if (s.includes('prd_inferred')) return 1;
+    return 2;
   };
-
   const sortBySource = (list: Intent[]) =>
-    [...list].sort((a, b) => {
-      const order = { prd: 0, prd_inferred: 1, data: 2 };
-      return (order[a.source as keyof typeof order] ?? 3) - (order[b.source as keyof typeof order] ?? 3);
-    });
+    [...list].sort((a, b) => sourceRank(a) - sourceRank(b));
 
   const visibleIntents = sortBySource(
     sourceFilter === "all"
       ? intents
       : sourceFilter === "prd"
-      ? intents.filter((i) => i.source === 'prd' || i.source === 'prd_inferred')
-      : intents.filter((i) => i.source === sourceFilter)
+      ? intents.filter(hasPrd)
+      : intents.filter(hasData)
   );
 
   const handleDownloadJson = () => {
@@ -241,7 +234,7 @@ export default function IntentCurationTab({
               <th className="px-4 py-3 w-[130px]">Phase</th>
               <th className="px-4 py-3">Utterance (Typical User Ask)</th>
               <th className="px-4 py-3 w-[230px]">Trigger Moment</th>
-              <th className="px-4 py-3 w-[80px] text-center">Post</th>
+              <th className="px-4 py-3 w-[80px] text-center">CITE</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 text-stone-700">
@@ -253,16 +246,21 @@ export default function IntentCurationTab({
               </tr>
             ) : (
               visibleIntents.map((item) => {
-                const effectivePosts = getEffectiveSourcePosts(item);
+                const effectivePosts = getSourcePosts(item);
+                const effectivePrdSources = getPrdSources(item);
+                const hasPrdSource = effectivePrdSources.length > 0;
+                const citationCount = getCitationCount(item);
+                const srcs = getSources(item);
+                const isInferred = srcs.length === 1 && srcs[0] === 'prd_inferred';
                 return (
                 <React.Fragment key={item.id}>
                 <tr
                   className={`group transition-colors ${
                     item.selected
-                      ? item.source === 'prd_inferred'
+                      ? isInferred
                         ? "bg-violet-50/40"
                         : "bg-[#ff4d00]/[0.03]"
-                      : item.source === 'prd_inferred'
+                      : isInferred
                       ? "bg-violet-50/20 hover:bg-violet-50/40"
                       : "hover:bg-stone-50/50"
                   }`}
@@ -277,30 +275,32 @@ export default function IntentCurationTab({
                   </td>
                   
                   {/* Intent Name input cell */}
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
+                  <td className="px-4 py-2 align-top">
+                    <AutoTextarea
                       value={item.name}
                       onChange={(e) => onUpdateIntent(item.id, { name: e.target.value })}
-                      className={`bg-transparent border-none p-0 text-[13px] font-semibold w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] ${
-                        item.source === 'prd_inferred' ? 'text-violet-900 italic' : 'text-stone-900'
+                      minRows={1}
+                      className={`bg-transparent border-none p-0 text-[13px] font-semibold w-full focus:ring-0 focus:outline-none focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden break-words ${
+                        isInferred ? 'text-violet-900 italic' : 'text-stone-900'
                       }`}
                     />
                   </td>
 
-                  {/* Source cell (PRD Explicit / AI Explored / Data) */}
+                  {/* Source cell — một intent đã gộp hiện nhiều nhãn (vd explicit + data) */}
                   <td className="px-4 py-2">
-                    {item.source && (
-                      <span className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none ${
-                        item.source === "prd"
-                          ? "bg-indigo-100 text-indigo-800 border border-indigo-200/50"
-                          : item.source === "prd_inferred"
-                          ? "bg-violet-100 text-violet-800 border border-violet-200/50"
-                          : "bg-sky-100 text-sky-800 border border-sky-200/50"
-                      }`}>
-                        {item.source === "prd" ? "explicit" : item.source === "prd_inferred" ? "inferred" : "data"}
-                      </span>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {srcs.map((s) => (
+                        <span key={s} className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2 rounded-none ${
+                          s === "prd"
+                            ? "bg-indigo-100 text-indigo-800 border border-indigo-200/50"
+                            : s === "prd_inferred"
+                            ? "bg-violet-100 text-violet-800 border border-violet-200/50"
+                            : "bg-sky-100 text-sky-800 border border-sky-200/50"
+                        }`}>
+                          {s === "prd" ? "explicit" : s === "prd_inferred" ? "inferred" : "data"}
+                        </span>
+                      ))}
+                    </div>
                   </td>
 
                   {/* Coverage badge cell */}
@@ -313,12 +313,12 @@ export default function IntentCurationTab({
                   </td>
 
                   {/* Phase selector dropdown cell */}
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
+                  <td className="px-4 py-2 align-top">
+                    <AutoTextarea
                       value={item.phase}
                       onChange={(e) => onUpdateIntent(item.id, { phase: e.target.value })}
-                      className={`text-[9px] font-bold rounded-none py-1 px-2 uppercase w-full bg-transparent border-none outline-none focus:ring-0 focus:border-b focus:border-[#ff4d00] ${getPhaseStyle(
+                      minRows={1}
+                      className={`text-[9px] font-bold rounded-none py-1 uppercase w-full bg-transparent border-none outline-none focus:ring-0 focus:border-b focus:border-[#ff4d00] resize-none overflow-hidden break-words ${getPhaseStyle(
                         item.phase
                       )}`}
                     />
@@ -344,9 +344,10 @@ export default function IntentCurationTab({
                     />
                   </td>
 
-                  {/* Post cell — opens the source post(s) this intent was derived/confirmed from */}
+                  {/* CITE cell — opens the source(s) this intent was derived/confirmed from:
+                      the verbatim PRD excerpt and/or the social source post(s) */}
                   <td className="px-4 py-2 text-center">
-                    {effectivePosts.length > 0 && (
+                    {(effectivePosts.length > 0 || hasPrdSource) && (
                       <button
                         onClick={() => setExpandedSourceId(expandedSourceId === item.id ? null : item.id)}
                         className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-none border transition-colors cursor-pointer ${
@@ -356,16 +357,37 @@ export default function IntentCurationTab({
                         }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full ${expandedSourceId === item.id ? "bg-white" : "bg-emerald-500"}`} />
-                        {effectivePosts.length}
+                        {citationCount}
                       </button>
                     )}
                   </td>
                 </tr>
 
-                {/* Expandable source posts row */}
-                {expandedSourceId === item.id && effectivePosts.length > 0 && (
+                {/* Expandable citation row — verbatim PRD excerpt and/or social source posts */}
+                {expandedSourceId === item.id && (effectivePosts.length > 0 || hasPrdSource) && (
                   <tr key={`${item.id}-sources`} className="bg-emerald-50/40">
                     <td colSpan={8} className="px-8 py-3">
+                      {hasPrdSource && (
+                        <div className="mb-3">
+                          <p className="text-[9px] font-bold uppercase tracking-widest text-indigo-700 mb-2">
+                            PRD Source ({effectivePrdSources.length})
+                          </p>
+                          <div className="space-y-2">
+                            {effectivePrdSources.map((quote, idx) => (
+                              <div key={idx} className="flex items-start gap-3 bg-indigo-50/40 border border-indigo-100 rounded-none p-3">
+                                <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-indigo-800 bg-indigo-100 px-1.5 py-0.5">
+                                  prd
+                                </span>
+                                <p className="text-[11px] text-stone-600 italic leading-relaxed">
+                                  "{quote}"
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {effectivePosts.length > 0 && (
+                      <>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-700 mb-2">
                         Source Posts ({effectivePosts.length})
                       </p>
@@ -398,6 +420,8 @@ export default function IntentCurationTab({
                           </div>
                         ))}
                       </div>
+                      </>
+                      )}
                     </td>
                   </tr>
                 )}

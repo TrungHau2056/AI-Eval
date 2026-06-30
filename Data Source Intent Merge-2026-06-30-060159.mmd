@@ -1,0 +1,96 @@
+---
+config:
+  layout: elk
+---
+graph TD
+    A1["(A1) Upload nhiều file<br/>POST /api/ingest"] -->|"xlsx/csv/json/md/txt<br/>+ types[]"| LoaderFactory["loader_factory.get_loader<br/>(source_type|đuôi file)"]
+
+    LoaderFactory --> ExcelL["ExcelLoader<br/>(xlsx)"]
+    LoaderFactory --> JsonL["JsonLoader<br/>(json,whitelist)"]
+    LoaderFactory --> MarkdownL["MarkdownLoader<br/>(md/txt)"]
+    LoaderFactory --> SocialL["SocialLoader<br/>(Apify)"]
+    LoaderFactory --> PRDL["PRDLoader<br/>(md/txt)"]
+
+    ExcelL --> DataPath["Normalizer.normalize<br/>(strip→bỏ dòng ngắn<br/>→dedup exact→lọc lang)"]
+    JsonL --> DataPath
+    MarkdownL --> DataPath
+    SocialL --> SocialState["state.raw_social_content"]
+
+    PRDL --> PRDState["state.raw_prd_content<br/>(KHÔNG normalize/merge)"]
+
+    DataPath --> Merge["merge_sources<br/>(gộp data, nhãn nguồn<br/>---[social]--)<br/>PRD KHÔNG vào đây"]
+
+    Merge --> RawInput["state.raw_input"]
+
+    A2["(A2) Crawl social<br/>→ crawl_posts.json"] --> SocialState
+    A3["(A3) Paste text<br/>(logsText)"] -->|"gửi thẳng<br/>trong body"| B1Stage[" "]
+
+    RawInput --> B1Stage
+    SocialState --> B1Stage
+    PRDState --> B1Stage
+
+    B1Stage --> B["GIAI ĐOẠN B — SINH INTENT<br/>POST /api/discover"]
+
+    B --> Scope{"scope?<br/>data | prd | both<br/>→ run_data / run_prd / run_compare"}
+
+    Scope -->|"run_data"| B1["(B1) GOM NGUỒN DATA<br/>logsText | raw_input<br/>+ raw_social_content<br/>→ data_content"]
+    Scope -->|"run_prd"| PRDCache{"prd_changed?<br/>(md5 prd_hash<br/>vs prd_content_hash)"}
+
+    B1 --> DataBranch["NHÁNH DATA<br/>_mine_intents<br/>(data_content,<br/>guidance = ruleText,<br/>memory = 'intent')<br/>system = INTENT_SYSTEM"]
+
+    PRDCache -->|"YES / chưa cache"| PRDBranch["NHÁNH PRD<br/>_mine_prd_intents<br/>(prd_content,<br/>memory = 'intent_prd')<br/>system = INTENT_PRD_SYSTEM<br/>user = INTENT_PRD_USER"]
+    PRDCache -->|"NO"| PRDCached["dùng cache<br/>state.cached_prd_internal"]
+
+    DataBranch --> IA1["IntentAgent.run<br/>① prepare_chunks<br/>chunk_text ~15k token<br/>(settings.chunk_max_tokens)"]
+    PRDBranch --> IA1
+
+    IA1 --> IA2["② extract_intents_chunk<br/>build prompt + guidance<br/>+ memory_context<br/>llm.generate → _parse JSON<br/>raw_observation: DATA = trích/tóm (có thể paraphrase)<br/>PRD = TRÍCH NGUYÊN VĂN<br/>memory.add"]
+
+    IA2 -->|"quay lại nếu còn chunk"| IA2
+    IA2 -->|"hết chunk"| IA3["③ deduplicate_intents<br/>_deduplicate<br/>intent_name.lower exact<br/>(trong cùng 1 nguồn)"]
+
+    IA3 --> DataIntents["data_intents<br/>(source='data')"]
+    IA3 --> PRDIntentsNew["prd_intents<br/>(source='prd' | 'prd_inferred')"]
+    PRDIntentsNew --> SaveCache["state.cached_prd_internal<br/>+ state.prd_content_hash"]
+    PRDIntentsNew --> PRDIntents["prd_intents"]
+    PRDCached --> PRDIntents
+    SaveCache --> PRDIntents
+
+    DataIntents --> AttrPosts["_attribute_source_posts<br/>fuzzy token-overlap raw_observation/<br/>utterance vs crawl_posts.json<br/>(chịu paraphrase) → source_posts (max 3)"]
+
+    AttrPosts --> B3["(B3) ĐỐI CHIẾU (run_compare)<br/>IntentComparator.compare<br/>(prd_intents, data_intents)"]
+    PRDIntents --> B3
+
+    B3 --> Embed["embed mỗi intent (provider theo LLM)<br/>gemini: models/gemini-embedding-001<br/>openai: text-embedding-3-small<br/>text = intent_name + utterance + moment<br/>lỗi embed → degrade: bỏ coverage, KHÔNG crash"]
+
+    Embed --> Matrix["cosine matrix<br/>prd × data"]
+
+    Matrix --> HighSim{"sim ≥ HIGH<br/>(0.85)?"}
+    HighSim -->|"YES"| Match["MATCH"]
+    HighSim -->|"NO"| LowSim{"sim ≤ LOW<br/>(0.55)?"}
+    LowSim -->|"YES"| Different["KHÁC"]
+    LowSim -->|"NO"| Gray["_judge_gray<br/>1 LLM-pass<br/>_GRAY_SYSTEM<br/>same? yes→MATCH"]
+
+    Gray --> Coverage["_apply_coverage<br/>có match→'confirmed'<br/>không→'prd_only'/'data_only'<br/>+ matchedIds (cross-ref id)"]
+    Match --> Coverage
+    Different --> Coverage
+
+    Coverage --> Pools["_replace_pool (PRD) / _append_pool (data)<br/>giữ 2 pool gốc (re-discover + cache)<br/>+ giữ selected/phase/id user sửa"]
+
+    Pools --> MergeStep["(B3.5) GỘP CỤM CONFIRMED<br/>_build_merged_intents<br/>connected-components qua matchedIds<br/>cụm có cả PRD+DATA → 1 dòng:<br/>field từ DATA nhiều post nhất<br/>sources=[prd,data], coverage=confirmed<br/>prdSources ≤3 + sourcePosts ≤3<br/>cụm 1 phía → giữ nguyên"]
+
+    MergeStep --> B4["(B4) LƯU<br/>state.intents = danh sách đã gộp<br/>state.internal_intents mirror theo id<br/>(persona/test-case sinh 1 bộ, hết trùng)"]
+
+    B4 --> C["GIAI ĐOẠN C — CURATION FE<br/>IntentCurationTab — render thẳng (BE đã gộp):<br/>Source: nhiều badge từ item.sources<br/>CITE: item.prdSources + item.sourcePosts<br/>(KHÔNG còn mượn qua matchedIds)<br/>user sửa/chọn → generate-personas"]
+
+    classDef stageA fill:#eef2ff,stroke:#818cf8,stroke-width:2px
+    classDef stageB fill:#f0fdf4,stroke:#4ade80,stroke-width:2px
+    classDef stageC fill:#fff7ed,stroke:#fb923c,stroke-width:2px
+    classDef process fill:#ecfeff,stroke:#22d3ee,stroke-width:1px
+    classDef data fill:#f5f3ff,stroke:#a78bfa,stroke-width:1px
+    classDef decision fill:#fef2f2,stroke:#f87171,stroke-width:1px
+
+    class A1,LoaderFactory,ExcelL,JsonL,MarkdownL,SocialL,PRDL,DataPath,Merge,A2,A3,RawInput,SocialState,PRDState stageA
+    class B,B1,DataBranch,PRDBranch,PRDCached,IA1,IA2,IA3,DataIntents,PRDIntentsNew,PRDIntents,SaveCache,AttrPosts,B3,Embed,Matrix,Match,Different,Gray,Coverage,Pools,MergeStep,B4 stageB
+    class C stageC
+    class Scope,PRDCache,HighSim,LowSim decision

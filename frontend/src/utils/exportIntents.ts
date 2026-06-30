@@ -7,9 +7,10 @@ function intentToExportRow(intent: Intent) {
     phase: intent.phase,
     utterance: intent.utterance,
     trigger_moment: intent.triggerMoment,
-    source: intent.source ?? "",
+    source: (intent.sources && intent.sources.length > 0 ? intent.sources : intent.source ? [intent.source] : []).join("|"),
     coverage: intent.coverage ?? "",
     selected: intent.selected,
+    prd_sources: (intent.prdSources ?? (intent.prdSource ? [intent.prdSource] : [])).join(" || "),
     matched_ids: (intent.matchedIds ?? []).join("; "),
   };
 }
@@ -36,6 +37,7 @@ export function buildIntentsCsv(intents: Intent[]): string {
     "source",
     "coverage",
     "selected",
+    "prd_sources",
     "matched_ids",
   ];
 

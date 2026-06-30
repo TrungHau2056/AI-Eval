@@ -23,6 +23,10 @@ class FEIntent(BaseModel):
     coverage: str = ""  # confirmed | prd_only | data_only | "" (standalone)
     matchedIds: list[str] = Field(default_factory=list)
     sourcePosts: list[dict] = Field(default_factory=list)
+    prdSource: str = ""  # verbatim PRD excerpt (raw_observation) for prd-explicit intents
+    # Merge-aware fields: một intent đã gộp mang nhiều nhãn nguồn + nhiều trích dẫn PRD.
+    sources: list[str] = Field(default_factory=list)  # vd ["prd","data"] | ["prd_inferred"] | ["data"]
+    prdSources: list[str] = Field(default_factory=list)  # tối đa 3 trích dẫn PRD nguyên văn
 
 
 class FEPersona(BaseModel):

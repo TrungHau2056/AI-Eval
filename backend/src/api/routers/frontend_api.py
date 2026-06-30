@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -125,31 +126,76 @@ def _get_model() -> str:
     return preferred
 
 
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _tokens(s: str) -> set[str]:
+    """Token hoá thô (lowercase, bỏ từ 1 ký tự) để so khớp độ trùng."""
+    return {t for t in _WORD_RE.findall((s or "").lower()) if len(t) >= 2}
+
+
 def _attribute_source_posts(data_intents: list[dict]) -> None:
-    """Mutate mỗi data intent: thêm source_posts từ crawl_posts.json qua substring match."""
+    """Mutate mỗi data intent: gắn source_posts từ crawl_posts.json.
+
+    So khớp CHÍNH XÁC (substring) hay hỏng vì LLM thường paraphrase raw_observation.
+    → Dùng fuzzy: độ chứa token của intent trong post (containment), cộng điểm mạnh
+    nếu trùng nguyên văn. Lấy tối đa 3 post điểm cao nhất vượt ngưỡng.
+    """
     all_posts = load_crawl_posts()
     if not all_posts:
         return
+    # Tiền token hoá post 1 lần.
+    post_toks = [(_tokens(p.get("text") or ""), p) for p in all_posts]
+
+    THRESHOLD = 0.45  # ≥45% token đặc trưng của intent xuất hiện trong post (chặn trùng vu vơ)
     for intent in data_intents:
-        raw_obs = (intent.get("raw_observation") or "").strip().lower()
-        utterance = (intent.get("utterance") or "").strip().lower()
+        raw_obs = (intent.get("raw_observation") or "").strip()
+        utterance = (intent.get("utterance") or "").strip()
+        # Ưu tiên raw_observation (gần với câu trong post); chỉ thêm utterance khi quá ngắn.
+        query = _tokens(raw_obs)
+        if len(query) < 3:
+            query |= _tokens(utterance)
+        if len(query) < 3:
+            intent["source_posts"] = []
+            continue
+
+        ro_low = raw_obs.lower()
+        scored: list[tuple[float, dict]] = []
+        for toks, post in post_toks:
+            if not toks:
+                continue
+            inter = len(query & toks)
+            if inter == 0:
+                continue
+            score = inter / len(query)
+            # Trùng nguyên văn = bằng chứng chắc chắn → cộng điểm để luôn xếp đầu.
+            if len(ro_low) > 10 and ro_low in (post.get("text") or "").lower():
+                score += 1.0
+            scored.append((score, post))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
         matched = []
-        for post in all_posts:
-            text = (post.get("text") or "").lower()
-            if (raw_obs and len(raw_obs) > 10 and raw_obs in text) or \
-               (utterance and len(utterance) > 8 and utterance in text):
-                matched.append({
-                    "url": post.get("url", ""),
-                    "username": post.get("username", ""),
-                    "platform": post.get("platform", ""),
-                    "textExcerpt": (post.get("text") or "")[:250],
-                })
-        intent["source_posts"] = matched[:3]
+        for score, post in scored:
+            if score < THRESHOLD:
+                break
+            matched.append({
+                "url": post.get("url", ""),
+                "username": post.get("username", ""),
+                "platform": post.get("platform", ""),
+                "textExcerpt": (post.get("text") or "")[:250],
+            })
+            if len(matched) >= 3:
+                break
+        intent["source_posts"] = matched
 
 
 def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
     mapped = []
     for r in results:
+        source = r.get("source") if r.get("source") in ("data", "prd", "prd_inferred") else "data"
+        # raw_observation chỉ là trích dẫn PRD khi source == "prd"; với data nó là
+        # quote từ social, với prd_inferred thì rỗng → không nhồi vào prdSource.
+        prd_quote = (r.get("raw_observation") or "") if source == "prd" else ""
         mapped.append(FEIntent(
             id=r.get("id", uuid.uuid4().hex[:8]),
             name=r.get("intent_name", ""),
@@ -157,12 +203,98 @@ def _map_pipeline_intents_to_fe(results: list[dict]) -> list[FEIntent]:
             utterance=r.get("utterance", ""),
             triggerMoment=r.get("moment", r.get("context", "")),
             selected=True,
-            source=r.get("source") if r.get("source") in ("data", "prd", "prd_inferred") else "data",
+            source=source,
             coverage=r.get("coverage", ""),
             matchedIds=r.get("matchedIds", []) or [],
             sourcePosts=r.get("source_posts") or [],
+            prdSource=prd_quote,
+            sources=[source],
+            prdSources=[prd_quote] if prd_quote else [],
         ))
     return mapped
+
+
+def _build_merged_intents(prd_pool: list[FEIntent], data_pool: list[FEIntent]) -> list[FEIntent]:
+    """Gộp các cụm PRD↔DATA đã match (confirmed) thành 1 intent.
+
+    - Đồ thị: node = mọi FEIntent; cạnh = matchedIds (chỉ giữ cạnh trỏ tới id tồn tại).
+    - Connected components (BFS). Cụm có cả PRD lẫn DATA → gộp 1 dòng; cụm 1 phía → giữ nguyên.
+    - Dòng gộp lấy field từ DATA member nhiều sourcePosts nhất; cite cắt ≤3 post + ≤3 PRD quote.
+    PRD/data pool gốc KHÔNG bị đụng — đây chỉ là phép chiếu tạo state.intents.
+    """
+    all_intents = list(prd_pool) + list(data_pool)
+    by_id: dict[str, FEIntent] = {it.id: it for it in all_intents}
+
+    # Adjacency 2 chiều, chỉ giữ cạnh hợp lệ (id đối tác tồn tại).
+    adj: dict[str, set[str]] = {it.id: set() for it in all_intents}
+    for it in all_intents:
+        for mid in it.matchedIds or []:
+            if mid in by_id:
+                adj[it.id].add(mid)
+                adj[mid].add(it.id)
+
+    def _is_prd(it: FEIntent) -> bool:
+        return it.source in ("prd", "prd_inferred")
+
+    seen: set[str] = set()
+    merged: list[FEIntent] = []
+    # Giữ thứ tự ổn định theo all_intents (PRD trước, data sau).
+    for start in all_intents:
+        if start.id in seen:
+            continue
+        # BFS lấy component.
+        comp_ids: list[str] = []
+        queue = [start.id]
+        seen.add(start.id)
+        while queue:
+            cur = queue.pop()
+            comp_ids.append(cur)
+            for nxt in adj[cur]:
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        members = [by_id[i] for i in comp_ids]
+        prd_members = [m for m in members if _is_prd(m)]
+        data_members = [m for m in members if not _is_prd(m)]
+
+        # Cụm 1 phía (chỉ PRD hoặc chỉ DATA) → giữ nguyên từng member.
+        if not prd_members or not data_members:
+            merged.extend(members)
+            continue
+
+        # Cụm gộp: primary = DATA nhiều sourcePosts nhất (tie → đầu tiên).
+        primary = max(data_members, key=lambda m: len(m.sourcePosts or []))
+        labels: list[str] = []
+        for m in members:
+            if m.source not in labels:
+                labels.append(m.source)
+
+        prd_quotes: list[str] = []
+        for m in prd_members:
+            for q in (m.prdSources or ([m.prdSource] if m.prdSource else [])):
+                if q and q not in prd_quotes:
+                    prd_quotes.append(q)
+
+        posts: list[dict] = []
+        seen_posts: set[str] = set()
+        for m in data_members:
+            for p in m.sourcePosts or []:
+                key = p.get("url") or p.get("textExcerpt") or ""
+                if key and key not in seen_posts:
+                    seen_posts.add(key)
+                    posts.append(p)
+
+        merged.append(primary.model_copy(update={
+            "source": "data",
+            "sources": labels,
+            "coverage": "confirmed",
+            "prdSource": prd_quotes[0] if prd_quotes else "",
+            "prdSources": prd_quotes[:3],
+            "sourcePosts": posts[:3],
+            "matchedIds": [],
+        }))
+
+    return merged
 
 
 def _map_pipeline_personas_to_fe(results: list[dict], fe_intent_name_to_id: dict[str, str] | None = None) -> list[FEPersona]:
@@ -456,7 +588,8 @@ def discover_intents(req: DiscoverRequest):
                 logger.info("PRD unchanged — using cached PRD intents (count=%d)", len(state.cached_prd_internal))
                 prd_intents = [i.model_dump() for i in state.cached_prd_internal]
         if run_compare and (data_intents or prd_intents):
-            comparator = IntentComparator(llm, api_key)
+            # provider=model để embedding (gap analysis) dùng đúng API + key của LLM đang chọn.
+            comparator = IntentComparator(llm, api_key, provider=model)
             prd_intents, data_intents = await comparator.compare(prd_intents, data_intents)
         return data_intents, prd_intents
 
@@ -479,8 +612,26 @@ def discover_intents(req: DiscoverRequest):
     if new_data_fe:
         state.data_intents = _append_pool(state.data_intents, new_data_fe)
 
-    state.intents = state.prd_intents + state.data_intents
-    state.internal_intents = [Intent(**r) for r in prd_intents + data_intents]
+    # Gộp các cụm PRD↔DATA đã match thành 1 dòng (phép chiếu — KHÔNG đụng 2 pool gốc).
+    state.intents = _build_merged_intents(state.prd_intents, state.data_intents)
+
+    # internal_intents phải khớp 1:1 với state.intents theo id để persona/test-case dùng
+    # đúng intent đã gộp (sinh 1 bộ persona thay vì trùng). Lấy raw_observation/why_valid
+    # từ dict nội bộ của run này nếu khớp id, còn lại suy từ FEIntent.
+    internal_by_id = {r["id"]: r for r in prd_intents + data_intents}
+    state.internal_intents = [
+        Intent(
+            id=fe.id,
+            intent_name=fe.name,
+            utterance=fe.utterance,
+            moment=fe.triggerMoment,
+            phase=fe.phase,
+            source=fe.source,
+            raw_observation=(internal_by_id.get(fe.id, {}).get("raw_observation") or fe.prdSource or ""),
+            why_valid=internal_by_id.get(fe.id, {}).get("why_valid", ""),
+        )
+        for fe in state.intents
+    ]
     logger.info("Stored %d FE intents (data=%d, prd=%d)", len(state.intents), len(data_intents), len(prd_intents))
     if not state.intents:
         logger.warning(
