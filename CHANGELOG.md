@@ -1,5 +1,26 @@
 # Changelog
 
+## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — UI tweaks
+
+Dọn dẹp UI các tab ingest / persona / test-case và popup chờ.
+
+### Added — Tính năng mới
+- **Xuất file Persona**: thêm nút **Export JSON** / **Export CSV** ở tab Persona (cạnh dropdown chọn intent). CSV kèm cả tên intent đã resolve.
+  `frontend/src/components/PersonaPlaygroundTab.tsx`, `frontend/src/utils/exportPersonas.ts`
+
+### Changed — Thay đổi
+- **Data Ingestion**: ẩn ô nhập "posts mỗi keyword", **cố định = 1** (không cho người dùng chỉnh).
+  `frontend/src/components/DataIngestionTab.tsx`
+- **Popup chờ (OperationConsole)**: bỏ bộ đếm `step x / N` ở góc header.
+  `frontend/src/components/OperationConsole.tsx`
+
+### Removed — Gỡ bỏ
+- **Nút "Include viral signals"** (Data Ingestion): gỡ hẳn vì cờ `isViral` không bao giờ được gửi xuống backend → chỉ là UI giả.
+  `frontend/src/components/DataIngestionTab.tsx`
+- **Banner "Configure Generation Rules"** ở tab Test case (Export): gỡ banner + prop `onOpenRuleModal` không còn dùng.
+  `frontend/src/components/ExportTab.tsx`, `frontend/src/App.tsx`
+- **Xóa `DataIngestionTab_ver2.tsx`**: file không được import ở đâu (dead code, dùng `onDiscoverSocial` mock thay vì `onCrawlSocial` thật).
+
 ## [Chưa phát hành] — 2026-06-30 (nhánh `vietanh`)
 
 Tập trung vào màn **Intent Curation**: cột trích dẫn (CITE), gộp intent PRD↔DATA, gap-analysis đa-provider, và sửa lỗi trích nguồn từ crawl data.

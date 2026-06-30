@@ -128,9 +128,6 @@ export default function OperationConsole({ operation }: OperationConsoleProps) {
                   {config.label}
                 </span>
               </div>
-              <span className="text-[9px] font-mono text-stone-500">
-                step {msgIdx + 1} / {config.messages.length}
-              </span>
             </div>
 
             {/* Row 2: cycling message + cursor */}
