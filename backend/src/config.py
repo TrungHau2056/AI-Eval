@@ -20,7 +20,8 @@ class Settings(BaseSettings):
 
     # LLM model ids (cấu hình được qua .env)
     gemini_model: str = "gemini-2.5-flash"
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-4o"
+    openai_pricing_json: str = "{}"
 
     # Gap analysis / IntentComparator
     embedding_model: str = "models/gemini-embedding-001"

@@ -16,6 +16,7 @@ from src.ingestion.loader_factory import get_loader
 from src.ingestion.normalizer import merge_sources
 from src.ingestion.prd_loader import PRDLoader
 from src.llm.factory import create_llm_client
+from src.observability.costs import cost_operation, summarize_run
 from src.observability.langfuse import flush_langfuse
 from src.models.schemas import (
     FEIntent,
@@ -228,6 +229,7 @@ def get_state_endpoint():
         "personas": [p.model_dump() for p in state.personas],
         "testCases": [tc.model_dump() for tc in state.test_cases],
         "prdLoaded": bool(state.raw_prd_content.strip()),
+        "costSummary": summarize_run(),
     }
 
 
@@ -256,6 +258,7 @@ def update_state(body: StateUpdateRequest):
             "intents": [i.model_dump() for i in state.intents],
             "personas": [p.model_dump() for p in state.personas],
             "testCases": [tc.model_dump() for tc in state.test_cases],
+            "costSummary": summarize_run(),
         },
     }
 
@@ -463,7 +466,8 @@ def discover_intents(req: DiscoverRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting discovery | scope=%s ...", scope)
-        data_intents, prd_intents = loop.run_until_complete(_run())
+        with cost_operation("discover"):
+            data_intents, prd_intents = loop.run_until_complete(_run())
     except Exception as e:
         logger.error("Discovery failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Intent: {e}")
@@ -490,7 +494,7 @@ def discover_intents(req: DiscoverRequest):
             len(state.raw_social_content or ""),
         )
 
-    return {"intents": [i.model_dump() for i in state.intents], "fallback": False}
+    return {"intents": [i.model_dump() for i in state.intents], "fallback": False, "costSummary": summarize_run()}
 
 
 @router.post("/api/generate-personas")
@@ -536,7 +540,8 @@ def generate_personas(req: GeneratePersonasRequest):
         guidance = req.ruleText
         if req.feedback:
             guidance = f"{guidance}\n{req.feedback}" if guidance else req.feedback
-        results = loop.run_until_complete(agent.run(internal_intents, guidance, trace_id=state.trace_id))
+        with cost_operation("generate_personas"):
+            results = loop.run_until_complete(agent.run(internal_intents, guidance, trace_id=state.trace_id))
         logger.info("PersonaAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("PersonaAgent.run() failed: %s", e, exc_info=True)
@@ -552,7 +557,7 @@ def generate_personas(req: GeneratePersonasRequest):
     state.internal_personas = [Persona(**r) for r in results]
     logger.info("Stored %d FE personas in state", len(fe_personas))
 
-    return {"personas": [p.model_dump() for p in fe_personas], "fallback": False}
+    return {"personas": [p.model_dump() for p in fe_personas], "fallback": False, "costSummary": summarize_run()}
 
 
 @router.post("/api/generate-testcases")
@@ -609,7 +614,8 @@ def generate_testcases(req: GenerateTestCasesRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Starting TestCaseAgent.run() ...")
-        results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText, trace_id=state.trace_id))
+        with cost_operation("generate_testcases"):
+            results = loop.run_until_complete(agent.run(internal_personas, internal_intents, req.ruleText, trace_id=state.trace_id))
         logger.info("TestCaseAgent.run() completed | raw_results=%d", len(results))
     except Exception as e:
         logger.error("TestCaseAgent.run() failed: %s", e, exc_info=True)
@@ -623,7 +629,7 @@ def generate_testcases(req: GenerateTestCasesRequest):
     state.internal_test_prompts = [TestCasePrompt(**r) for r in results]
     logger.info("Stored %d FE test cases in state", len(fe_testcases))
 
-    return {"testCases": [tc.model_dump() for tc in fe_testcases], "fallback": False}
+    return {"testCases": [tc.model_dump() for tc in fe_testcases], "fallback": False, "costSummary": summarize_run()}
 
 
 @router.post("/api/state/reset")
@@ -641,6 +647,7 @@ def reset_pipeline():
             "intents": [i.model_dump() for i in state.intents],
             "personas": [p.model_dump() for p in state.personas],
             "testCases": [tc.model_dump() for tc in state.test_cases],
+            "costSummary": summarize_run(),
         },
     }
 
@@ -674,7 +681,8 @@ def compile_rule(req: CompileRuleRequest):
     loop = asyncio.new_event_loop()
     try:
         logger.info("Compiling rule with LLM ...")
-        result = loop.run_until_complete(llm.generate(prompt))
+        with cost_operation("compile_rule"):
+            result = loop.run_until_complete(llm.generate(prompt))
         logger.info("Rule compiled | length=%d", len(result))
     except Exception as e:
         logger.error("Rule compilation failed: %s", e, exc_info=True)
@@ -683,7 +691,7 @@ def compile_rule(req: CompileRuleRequest):
         loop.close()
 
     compiled = result.strip() or current_rule
-    return {"success": True, "compiledDirective": compiled, "rule": compiled, "fallback": False}
+    return {"success": True, "compiledDirective": compiled, "rule": compiled, "fallback": False, "costSummary": summarize_run()}
 
 
 @router.post("/api/testcases/run")

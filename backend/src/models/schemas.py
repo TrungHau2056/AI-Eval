@@ -143,4 +143,8 @@ class PipelineState(BaseModel):
     internal_test_prompts: list[TestCasePrompt] = Field(default_factory=list)
     current_step: int = 0
     trace_id: str = ""
+    cost_run_id: str = ""
+    cost_run_closed: bool = False
+    cost_events: list[dict] = Field(default_factory=list)
+    cost_summary: dict = Field(default_factory=dict)
 

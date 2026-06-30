@@ -4,6 +4,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from src.llm.base import LLMClient
+from src.observability.costs import record_openai_usage
 
 
 class OpenAIClient(LLMClient):
@@ -18,6 +19,10 @@ class OpenAIClient(LLMClient):
         messages.append({"role": "user", "content": prompt})
         response = await self.client.chat.completions.create(
             model=self.model, messages=messages
+        )
+        record_openai_usage(
+            model=getattr(response, "model", None) or self.model,
+            usage=getattr(response, "usage", None),
         )
         return response.choices[0].message.content
 

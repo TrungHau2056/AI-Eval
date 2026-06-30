@@ -34,6 +34,22 @@ export interface IngestStats {
   warnings: string[];
 }
 
+export interface CostSummary {
+  run_id?: string | null;
+  event_count?: number;
+  openai_event_count?: number;
+  apify_event_count?: number;
+  openai_estimated_usd?: number | null;
+  apify_actual_usd?: number | null;
+  total_usd?: number | null;
+  price_missing_count?: number;
+  missing_cost_count?: number;
+  started_at?: string | null;
+  last_event_at?: string | null;
+  ended_at?: string | null;
+  closed?: boolean;
+}
+
 export interface Persona {
   id: string;
   intentId?: string;

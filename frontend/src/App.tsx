@@ -9,7 +9,7 @@ import PersonaPlaygroundTab from "./components/PersonaPlaygroundTab";
 import ExportTab from "./components/ExportTab";
 import RunningTestsModal from "./components/RunningTestsModal";
 import OperationConsole from "./components/OperationConsole";
-import { Intent, Persona, TestCase, IngestStats } from "./types";
+import { CostSummary, Intent, Persona, TestCase, IngestStats } from "./types";
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -22,6 +22,7 @@ export default function App() {
   const [intents, setIntents] = useState<Intent[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
+  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
 
   // Synchronized generation rules
   const [intentRule, setIntentRule] = useState(() => {
@@ -57,6 +58,13 @@ export default function App() {
   const [viewingTestCase, setViewingTestCase] = useState<TestCase | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
 
+  const applyCostSummary = (payload: any) => {
+    const nextSummary = payload?.costSummary || payload?.state?.costSummary || payload?.summary;
+    if (nextSummary) {
+      setCostSummary(nextSummary);
+    }
+  };
+
   // Reset pipeline state once per browser tab load (F5). Skip on Vite HMR remounts so
   // crawled social data in memory is not wiped mid-session.
   useEffect(() => {
@@ -74,6 +82,7 @@ export default function App() {
           setIntents(data.state.intents || []);
           setPersonas(data.state.personas || []);
           setTestCases(data.state.testCases || []);
+          applyCostSummary(data);
         }
       })
       .catch((err) => {
@@ -89,6 +98,37 @@ export default function App() {
     }, 4000);
   };
 
+  const refreshCosts = async () => {
+    try {
+      const response = await fetch("/api/costs/current");
+      if (!response.ok) throw new Error("Failed to refresh cost summary.");
+      const data = await response.json();
+      applyCostSummary(data);
+    } catch (err) {
+      console.error("Failed to refresh cost summary:", err);
+      showToast("Could not refresh usage cost.", "error");
+    }
+  };
+
+  const endCostRun = async () => {
+    try {
+      const response = await fetch("/api/costs/end-run", { method: "POST" });
+      if (!response.ok) throw new Error("Failed to end cost run.");
+      const data = await response.json();
+      applyCostSummary(data);
+      const total = data?.summary?.total_usd;
+      showToast(
+        typeof total === "number"
+          ? `Cost run closed. Total: $${total.toFixed(total < 0.01 ? 6 : 4)}`
+          : "Cost run closed.",
+        "success",
+      );
+    } catch (err) {
+      console.error("Failed to end cost run:", err);
+      showToast("Could not close usage run.", "error");
+    }
+  };
+
   // Sync state helpers
   const saveStateToServer = (updatedFields: any) => {
     fetch("/api/state", {
@@ -98,6 +138,7 @@ export default function App() {
     })
       .then((res) => res.json())
       .then((data) => {
+        applyCostSummary(data);
         if (!data.success) {
           console.error("Server declined state sync.");
         }
@@ -171,10 +212,12 @@ export default function App() {
       }
 
       const result = await response.json();
+      applyCostSummary(result);
 
       // refresh local state from full-stack state endpoint
       const statsRes = await fetch("/api/state");
       const freshState = await statsRes.json();
+      applyCostSummary(freshState);
       setIntents(freshState.intents || []);
       setPrdLoaded(!!freshState.prdLoaded);
 
@@ -232,6 +275,7 @@ export default function App() {
       });
 
       const result = await response.json();
+      applyCostSummary(result);
       if (!response.ok || result.error) {
         throw new Error(result.detail || result.error || "Social crawl failed.");
       }
@@ -302,6 +346,7 @@ export default function App() {
       });
       if (!res.ok) throw new Error("Persona generation failed");
       const data = await res.json();
+      applyCostSummary(data);
       setPersonas(data.personas || []);
       if (data.fallback) {
         showToast("Generated model test personas for active QA suite.", "info");
@@ -337,6 +382,7 @@ export default function App() {
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
+      applyCostSummary(data);
       // Find the regenerated persona matching the same type
       const matchType = target?.type || "happy";
       const updatedPersona = data.personas.find((p: Persona) => p.type === matchType) || data.personas[0];
@@ -378,6 +424,7 @@ export default function App() {
       });
       if (!res.ok) throw new Error("Test compiles failed");
       const data = await res.json();
+      applyCostSummary(data);
       setTestCases(data.testCases || []);
       if (data.fallback) {
         showToast("Synthetic Test Suite compiled successfully.", "info");
@@ -415,6 +462,7 @@ export default function App() {
 
       if (!response.ok) throw new Error();
       const data = await response.json();
+      applyCostSummary(data);
       if (data.compiledDirective) {
         if (activeRuleType === "intent") {
           setIntentRule(data.compiledDirective);
@@ -515,6 +563,7 @@ export default function App() {
       fetch("/api/state/reset", { method: "POST" })
         .then((res) => res.json())
         .then((data) => {
+          applyCostSummary(data);
           if (data.success) {
             setIntents(data.state.intents || []);
             setPersonas(data.state.personas || []);
@@ -563,6 +612,9 @@ export default function App() {
         onAiModelChange={handleAiModelChange}
         activeSidebarTab={activeSidebarTab}
         setActiveSidebarTab={setActiveSidebarTab}
+        costSummary={costSummary}
+        onRefreshCosts={refreshCosts}
+        onEndCostRun={endCostRun}
         onComingSoonClick={() => showToast("Support and documentation is coming soon.", "info")}
       />
 
@@ -573,6 +625,7 @@ export default function App() {
         <Header
           currentStep={currentStep}
           onRunTest={triggerPipelineRun}
+          costSummary={costSummary}
         />
 
         {/* Workspace Alert Indicator */}

@@ -29,6 +29,7 @@ from src.api.routers.frontend_api import (
 )
 from src.llm.factory import create_llm_client
 from src.models.schemas import Intent, RawInput
+from src.observability.costs import cost_operation, summarize_run
 from src.pipeline.intent_extractor import IntentAgent
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ class FacebookCrawlResponse(BaseModel):
     new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
+    costSummary: dict = Field(default_factory=dict)
     error: Optional[str] = None
 class ThreadsCrawlRequest(BaseModel):
     """Request body cho POST /api/crawl/threads."""
@@ -165,6 +167,7 @@ class ThreadsCrawlResponse(BaseModel):
     new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
+    costSummary: dict = Field(default_factory=dict)
     error: Optional[str] = None
 
 class TiktokCrawlRequest(BaseModel):
@@ -191,6 +194,7 @@ class TiktokCrawlResponse(BaseModel):
     new_crawl_posts: list[dict] = Field(default_factory=list, description="Posts from this crawl only")
     intents: Optional[list] = Field(default=None, description="Intents từ IntentAgent (nếu có)")
     crawl_logs: list[str] = Field(default_factory=list, description="Trace log của crawl pipeline")
+    costSummary: dict = Field(default_factory=dict)
     error: Optional[str] = None
 
 # ---------------------------------------------------------------------------
@@ -216,7 +220,8 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
         )
-        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
+        with cost_operation("crawl_facebook"):
+            raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return FacebookCrawlResponse(
@@ -226,14 +231,16 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
             raw_content_preview="",
             raw_content_length=0,
             raw_content="",
+            costSummary=summarize_run(refresh_apify=True),
             error=f"Crawl error: {exc}",
         )
     # ---- Store crawled content: prepend to JSON file + sync pipeline state ----
     new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
-        intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
-        )
+        with cost_operation("crawl_facebook"):
+            intents, crawl_logs = await _mine_and_store(
+                raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
+            )
     else:
         intents, crawl_logs = [], _crawl_logs(
             req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
@@ -250,6 +257,7 @@ async def crawl_facebook(req: FacebookCrawlRequest) -> FacebookCrawlResponse:
         new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
+        costSummary=summarize_run(refresh_apify=True),
     )
 @router.post("/threads", response_model=ThreadsCrawlResponse)
 async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
@@ -271,7 +279,8 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             search_limit=req.search_limit,
             posts_limit=req.posts_limit,
         )
-        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
+        with cost_operation("crawl_threads"):
+            raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return ThreadsCrawlResponse(
@@ -281,13 +290,15 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
             raw_content_preview="",
             raw_content_length=0,
             raw_content="",
+            costSummary=summarize_run(refresh_apify=True),
             error=f"Crawl error: {exc}",
         )
     new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
-        intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
-        )
+        with cost_operation("crawl_threads"):
+            intents, crawl_logs = await _mine_and_store(
+                raw_content, req.domain, req.platform, _normalize_keywords(req.keywords)
+            )
     else:
         intents, crawl_logs = [], _crawl_logs(
             req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
@@ -303,6 +314,7 @@ async def crawl_threads(req: ThreadsCrawlRequest) -> ThreadsCrawlResponse:
         new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
+        costSummary=summarize_run(refresh_apify=True),
     )
 
 # ---------------------------------------------------------------------------
@@ -324,7 +336,8 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             apify_token=token,
             search_limit=req.search_limit,
         )
-        raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
+        with cost_operation("crawl_tiktok"):
+            raw_content = await crawler.run(keywords=_normalize_keywords(req.keywords))
     except Exception as exc:
         logger.exception("Crawl failed")
         return TiktokCrawlResponse(
@@ -334,14 +347,16 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
             raw_content_preview="",
             raw_content_length=0,
             raw_content="",
+            costSummary=summarize_run(refresh_apify=True),
             error=f"Crawl error: {exc}",
         )
     
     new_posts, all_posts = persist_crawl_posts(req.platform, raw_content)
     if req.extract_intents:
-        intents, crawl_logs = await _mine_and_store(
-            raw_content, req.domain, req.platform, _normalize_keywords(req.keywords), source_type="tiktok"
-        )
+        with cost_operation("crawl_tiktok"):
+            intents, crawl_logs = await _mine_and_store(
+                raw_content, req.domain, req.platform, _normalize_keywords(req.keywords), source_type="tiktok"
+            )
     else:
         intents, crawl_logs = [], _crawl_logs(
             req.platform, _normalize_keywords(req.keywords), len(new_posts), len(all_posts)
@@ -357,6 +372,7 @@ async def crawl_tiktok(req: TiktokCrawlRequest) -> TiktokCrawlResponse:
         new_crawl_posts=new_posts,
         intents=intents,
         crawl_logs=crawl_logs,
+        costSummary=summarize_run(refresh_apify=True),
     )
 
 # ---------------------------------------------------------------------------
