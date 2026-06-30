@@ -51,44 +51,50 @@ const normalizeKeywords = (items: string[]): string[] => {
 };
 
 // Pre-defined domains and their default search keywords (plain text, used as real crawl queries).
+// Each domain holds 10 facet-coverage keywords; the first 5 are the "core" set selected by
+// default (see CORE_KEYWORD_COUNT), the remaining 5 are shown as extra suggestions.
+const CORE_KEYWORD_COUNT = 5;
 const PRESET_DOMAINS = [
   {
     id: "du-lich",
     label: "Du lịch",
     icon: "explore",
-    tags: ["#hủy_vé", "#khách_sạn", "#vũng_tàu", "#đà_lạt", "#tour_giá_rẻ", "#hành_lý"]
+    tags: ["#đặt_phòng", "#vé_máy_bay", "#tour_du_lịch", "#hủy_vé", "#hoàn_tiền_tour", "#khách_sạn", "#visa_du_lịch", "#hành_lý_thất_lạc", "#review_điểm_đến", "#lừa_đảo_tour"]
   },
   {
     id: "giai-tri",
     label: "Giải trí",
     icon: "theater_comedy",
-    tags: ["#concert", "#netflix", "#bản_quyền", "#vé_vip", "#livestream", "#phim_bom_tấn"]
+    tags: ["#mua_vé_concert", "#vé_xem_phim", "#hoàn_vé", "#lừa_đảo_vé", "#review_phim", "#gói_netflix", "#bản_quyền_phim", "#livestream_sự_kiện", "#lịch_chiếu", "#vé_giả"]
   },
   {
     id: "the-thao",
     label: "Thể thao",
     icon: "sports_soccer",
-    tags: ["#marathon", "#đăng_ký_bib", "#giải_chạy", "#gym_card", "#gián_đoạn", "#bóng_đá"]
+    tags: ["#đăng_ký_giải_chạy", "#vé_bib", "#đặt_sân", "#hoàn_phí_giải", "#review_phòng_gym", "#gym_membership", "#dụng_cụ_thể_thao", "#chấn_thương", "#giải_marathon", "#sự_cố_đăng_ký"]
   },
   {
     id: "cong-nghe",
     label: "Công nghệ",
     icon: "devices",
-    tags: ["#lỗi_app", "#cập_nhật", "#bảo_mật", "#api_key", "#lag", "#crash"]
+    tags: ["#lỗi_ứng_dụng", "#cập_nhật_phần_mềm", "#bảo_mật_tài_khoản", "#hỗ_trợ_kỹ_thuật", "#review_thiết_bị", "#mất_dữ_liệu", "#app_crash", "#lỗi_đăng_nhập", "#bảo_hành", "#lag_giật"]
   },
   {
     id: "tai-chinh",
     label: "Tài chính",
     icon: "payments",
-    tags: ["#giao_dịch", "#hoàn_tiền", "#lãi_suất", "#thanh_toán", "#bị_khóa", "#mã_otp"]
+    tags: ["#giao_dịch_lỗi", "#hoàn_tiền", "#phí_dịch_vụ", "#khóa_tài_khoản", "#lừa_đảo_tài_chính", "#lãi_suất", "#mã_otp", "#thẻ_tín_dụng", "#hỗ_trợ_ngân_hàng", "#lỗi_app_banking"]
   },
   {
     id: "giao-duc",
     label: "Giáo dục",
     icon: "school",
-    tags: ["#khóa_học", "#học_phí", "#chứng_chỉ", "#thi_thử", "#tài_liệu", "#đăng_ký"]
+    tags: ["#khóa_học_online", "#học_phí", "#hoàn_học_phí", "#chất_lượng_giảng_dạy", "#lừa_đảo_khóa_học", "#chứng_chỉ", "#đăng_ký_khóa_học", "#tài_liệu_học", "#review_trung_tâm", "#hỗ_trợ_học_viên"]
   }
 ];
+
+// Custom (non-preset) domain default keywords: 5 core selected + 5 extra suggestions.
+const CUSTOM_DOMAIN_TAGS = ["#hỗ_trợ", "#góp_ý", "#đánh_giá", "#hoàn_tiền", "#sự_cố", "#lừa_đảo", "#giá_cả", "#review", "#khuyến_mãi", "#tư_vấn"];
 
 export default function DataIngestionTab({
   onDiscover,
@@ -164,15 +170,16 @@ export default function DataIngestionTab({
     }
   }, [prdAvailable, discoveryScope]);
 
-  // Auto-populate keywords when preset domain changes
+  // Auto-populate keywords when preset domain changes.
+  // Only the first CORE_KEYWORD_COUNT keywords are pre-selected (the rest stay as suggestions).
   useEffect(() => {
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setNewKeywordInput(found.tags.join(", "));
+        setNewKeywordInput(found.tags.slice(0, CORE_KEYWORD_COUNT).join(", "));
       }
     } else {
-      setNewKeywordInput("#yêu_cầu_mới, #góp_ý, #hỗ_trợ");
+      setNewKeywordInput(CUSTOM_DOMAIN_TAGS.slice(0, CORE_KEYWORD_COUNT).join(", "));
     }
   }, [selectedDomainId, isCustomDomain]);
 
@@ -332,10 +339,11 @@ export default function DataIngestionTab({
     }
   };
 
-  // Suggested hashtags based on current domain
+  // Suggested hashtags based on current domain — shows the full 10-keyword pool
+  // (the pre-selected core ones appear highlighted because they're already in the input).
   const getRecommendedTags = () => {
     if (isCustomDomain) {
-      return ["#yêu_cầu_mới", "#góp_ý", "#hỗ_trợ", "#đánh_giá", "#chất_lượng", "#báo_giá", "#tư_vấn", "#khuyến_mãi"];
+      return CUSTOM_DOMAIN_TAGS;
     }
     const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
     return found ? found.tags : ["#phản_hồi", "#hỗ_trợ"];
@@ -375,15 +383,15 @@ export default function DataIngestionTab({
     }
   };
 
-  // Reset keywords to preset defaults
+  // Reset keywords to the core (pre-selected) defaults for the current domain.
   const handleResetKeywords = () => {
     if (!isCustomDomain) {
       const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
       if (found) {
-        setNewKeywordInput(found.tags.join(", "));
+        setNewKeywordInput(found.tags.slice(0, CORE_KEYWORD_COUNT).join(", "));
       }
     } else {
-      setNewKeywordInput("#yêu_cầu_mới, #góp_ý, #hỗ_trợ");
+      setNewKeywordInput(CUSTOM_DOMAIN_TAGS.slice(0, CORE_KEYWORD_COUNT).join(", "));
     }
   };
 

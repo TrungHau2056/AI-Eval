@@ -1,5 +1,16 @@
 # Changelog
 
+## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Keyword coverage
+
+Làm lại bộ keyword mặc định mỗi domain để **độ phủ nhu cầu người dùng** rộng hơn khi crawl social.
+
+### Added — Tính năng mới
+- **Prompt sinh keyword** (`backend/src/prompts/keyword_gen.txt`): sinh 10 keyword/domain phủ 7 facet (đặt-mua, giá, chất lượng, hỗ trợ, hoàn-hủy, sự cố, review), 5 cái đầu là bộ "lõi". Chạy offline 1 lần để dựng list rồi ghi cứng — không gọi lúc run app.
+
+### Changed — Thay đổi
+- **Keyword mỗi domain (Data Ingestion)**: thay 6 hashtag phẳng (thiên địa danh) bằng **10 keyword phủ facet**, trong đó **5 keyword "lõi" được chọn sẵn**, 5 cái còn lại hiển thị ở mục Suggested để bấm thêm. Áp dụng cho cả 6 preset lẫn custom domain (`CUSTOM_DOMAIN_TAGS`). Tách `getRecommendedTags` (hiện cả 10) khỏi keyword active (chỉ 5 lõi qua `slice(0, CORE_KEYWORD_COUNT)`).
+  `frontend/src/components/DataIngestionTab.tsx`
+
 ## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — UI tweaks
 
 Dọn dẹp UI các tab ingest / persona / test-case và popup chờ.
