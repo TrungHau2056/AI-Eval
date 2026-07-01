@@ -687,8 +687,10 @@ def generate_personas(req: GeneratePersonasRequest):
         guidance = req.ruleText
         if req.feedback:
             guidance = f"{guidance}\n{req.feedback}" if guidance else req.feedback
-        results = loop.run_until_complete(agent.run(internal_intents, guidance, trace_id=state.trace_id))
-        logger.info("PersonaAgent.run() completed | raw_results=%d", len(results))
+        results, failure_summary = loop.run_until_complete(
+            agent.run_with_diagnostics(internal_intents, guidance, trace_id=state.trace_id)
+        )
+        logger.info("PersonaAgent.run() completed | raw_results=%d | unresolved=%d", len(results), len(failure_summary))
     except Exception as e:
         logger.error("PersonaAgent.run() failed: %s", e, exc_info=True)
         raise HTTPException(500, f"Loi sinh Persona: {e}")
@@ -703,7 +705,47 @@ def generate_personas(req: GeneratePersonasRequest):
     state.internal_personas = [Persona(**r) for r in results]
     logger.info("Stored %d FE personas in state", len(fe_personas))
 
-    return {"personas": [p.model_dump() for p in fe_personas], "fallback": False}
+    # The generate/evaluate/refine loop (persona_graph.py) tracks the best-scoring attempt
+    # per intent across iterations and gives up after max_iterations rather than erroring —
+    # any intent still unresolved at that point shows up in failure_summary, with the
+    # highest-scoring pair it ever produced (possibly none, if every attempt failed to parse).
+    intent_num_to_name = {i.intent_num or idx + 1: i.intent_name for idx, i in enumerate(internal_intents)}
+    persona_issues: dict[str, dict] = {}
+    short_names: list[str] = []
+    for entry in failure_summary:
+        inum = entry.get("intent_num")
+        name = intent_num_to_name.get(inum, "")
+        fe_id = fe_intent_name_to_id.get(name)
+        if not fe_id:
+            continue
+        short_names.append(name)
+        fixes = entry.get("fixes", [])
+        issues = entry.get("issues", [])
+        reason = (
+            f"Chưa đạt rubric sau {entry.get('iteration', 0)}/5 vòng thử "
+            f"({entry.get('score', 0)}/{entry.get('max_score', 28)} điểm)."
+        )
+        persona_issues[fe_id] = {
+            "score": entry.get("score", 0),
+            "maxScore": entry.get("max_score", 28),
+            "reason": reason,
+            "fixes": [*fixes, *issues],
+        }
+
+    warning = None
+    if short_names:
+        warning = (
+            f"{len(short_names)} intent(s) couldn't be fully completed after retries: "
+            f"{', '.join(short_names)}. Showing the best attempt for each — try again or adjust the intent."
+        )
+        logger.warning("Persona generation incomplete | %s", warning)
+
+    return {
+        "personas": [p.model_dump() for p in fe_personas],
+        "fallback": False,
+        "warning": warning,
+        "personaIssues": persona_issues,
+    }
 
 
 @router.post("/api/generate-testcases")

@@ -6,8 +6,8 @@ type OpType = "ingest" | "discover" | "crawl" | "personas" | "testcases" | "rule
 const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string; messages: string[] }> = {
   ingest: {
     label: "DATA INGEST",
-    color: "text-sky-400",
-    dotColor: "bg-sky-400",
+    color: "text-sky-600",
+    dotColor: "bg-sky-500",
     messages: [
       "Parsing uploaded files...",
       "Normalizing source data...",
@@ -18,8 +18,8 @@ const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string
   },
   discover: {
     label: "INTENT DISCOVERY",
-    color: "text-[#ff6a30]",
-    dotColor: "bg-[#ff6a30]",
+    color: "text-[#ff4d00]",
+    dotColor: "bg-[#ff4d00]",
     messages: [
       "Chunking raw input...",
       "Running intent mining agent...",
@@ -30,8 +30,8 @@ const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string
   },
   crawl: {
     label: "SOCIAL CRAWL",
-    color: "text-emerald-400",
-    dotColor: "bg-emerald-400",
+    color: "text-emerald-600",
+    dotColor: "bg-emerald-500",
     messages: [
       "Connecting to social platforms...",
       "Fetching trending posts...",
@@ -42,8 +42,8 @@ const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string
   },
   personas: {
     label: "PERSONA SYNTHESIS",
-    color: "text-violet-400",
-    dotColor: "bg-violet-400",
+    color: "text-violet-600",
+    dotColor: "bg-violet-500",
     messages: [
       "Loading selected intents...",
       "Generating persona archetypes...",
@@ -54,8 +54,8 @@ const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string
   },
   testcases: {
     label: "TEST COMPILATION",
-    color: "text-amber-400",
-    dotColor: "bg-amber-400",
+    color: "text-amber-600",
+    dotColor: "bg-amber-500",
     messages: [
       "Mapping personas to intents...",
       "Synthesizing test prompts...",
@@ -66,8 +66,8 @@ const OP_CONFIG: Record<OpType, { label: string; color: string; dotColor: string
   },
   rule: {
     label: "DIRECTIVE REFINEMENT",
-    color: "text-fuchsia-400",
-    dotColor: "bg-fuchsia-400",
+    color: "text-fuchsia-600",
+    dotColor: "bg-fuchsia-500",
     messages: [
       "Analyzing existing directives...",
       "Refining with AI model...",
@@ -112,11 +112,11 @@ export default function OperationConsole({ operation }: OperationConsoleProps) {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 40, opacity: 0 }}
           transition={{ duration: 0.22, ease: "easeOut" }}
-          className="fixed top-20 right-6 z-50 w-80 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden select-none"
+          className="fixed top-20 right-6 z-50 w-80 bg-white border border-stone-200 rounded-none shadow-2xl overflow-hidden select-none"
         >
           {/* Content area */}
           <div className="px-4 py-3">
-            {/* Row 1: pulsing dot + label + step counter */}
+            {/* Row 1: pulsing dot + label */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 {/* Pulsing dot */}
@@ -139,7 +139,7 @@ export default function OperationConsole({ operation }: OperationConsoleProps) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   transition={{ duration: 0.2 }}
-                  className="text-[10.5px] font-mono text-stone-300 tracking-wide"
+                  className="text-[10.5px] font-mono text-stone-500 tracking-wide"
                 >
                   {config.messages[msgIdx]}
                 </motion.span>
@@ -154,14 +154,11 @@ export default function OperationConsole({ operation }: OperationConsoleProps) {
             </div>
           </div>
 
-          {/* Progress bar — flush bottom, outside padding */}
-          <div className="h-1.5 bg-stone-800">
-            <div
-              className="h-full bg-[#ff4d00] transition-all duration-700"
-              style={{
-                width: `${Math.min(((msgIdx + 1) / config.messages.length) * 100, 90)}%`,
-              }}
-            />
+          {/* Indeterminate progress bar — flush bottom, outside padding. Duration of the
+              underlying async op is unknown, so this slides continuously rather than filling
+              to a % and resetting (which read as "finishes then restarts"). */}
+          <div className="h-1 bg-stone-100 overflow-hidden">
+            <div className="h-full w-1/3 bg-[#ff4d00] progress-indeterminate" />
           </div>
         </motion.div>
       )}

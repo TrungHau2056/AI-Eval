@@ -52,6 +52,13 @@ export interface Persona {
   expectedAIBehavior?: string;
 }
 
+export interface PersonaIssue {
+  score: number;
+  maxScore: number;
+  reason: string;
+  fixes: string[];
+}
+
 export interface TestCase {
   id: string;
   intentName: string;

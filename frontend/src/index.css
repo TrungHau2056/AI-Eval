@@ -7,6 +7,21 @@
   --font-serif: "Lora", "Georgia", ui-serif, serif;
 }
 
+/* Indeterminate progress bar (OperationConsole) — duration of async ops is unknown, so the
+   filled segment slides back and forth instead of claiming a % complete that would have to
+   reset and re-run, which reads as a bug ("fills up then restarts"). */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+.progress-indeterminate {
+  animation: progress-indeterminate 1.3s ease-in-out infinite;
+}
+
 /* Custom gorgeous scrollbar styled for our dark areas */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;

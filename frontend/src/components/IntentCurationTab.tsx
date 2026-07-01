@@ -6,7 +6,7 @@ import { downloadIntentsCsv, downloadIntentsJson } from "../utils/exportIntents"
 interface IntentCurationTabProps {
   intents: Intent[];
   onUpdateIntent: (id: string, updated: Partial<Intent>) => void;
-  onToggleSelectAll: (checked: boolean) => void;
+  onToggleSelectAll: (ids: string[], checked: boolean) => void;
   onAddIntent: () => void;
   onProcessIntents: () => void;
   ruleText: string;
@@ -49,10 +49,6 @@ export default function IntentCurationTab({
     return styles[hash % styles.length];
   };
 
-  const handleToggleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onToggleSelectAll(e.target.checked);
-  };
-
   const selectedCount = intents.filter((i) => i.selected).length;
   const hasCoverage = intents.some((i) => i.coverage);
   // Source labels: a merged intent carries several (e.g. ["prd","data"]). Fallback to the
@@ -91,6 +87,13 @@ export default function IntentCurationTab({
       ? intents.filter(hasPrd)
       : intents.filter(hasData)
   );
+
+  // Select-all only applies to intents in the currently active sheet/tab (visibleIntents),
+  // not the entire intents list — otherwise checking "all" while on the PRD/Data tab would
+  // silently select intents the user can't even see.
+  const handleToggleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onToggleSelectAll(visibleIntents.map((i) => i.id), e.target.checked);
+  };
 
   const handleDownloadJson = () => {
     if (intents.length === 0) {
@@ -224,7 +227,7 @@ export default function IntentCurationTab({
                 <input
                   type="checkbox"
                   onChange={handleToggleSelectAll}
-                  checked={intents.length > 0 && intents.every((i) => i.selected)}
+                  checked={visibleIntents.length > 0 && visibleIntents.every((i) => i.selected)}
                   className="w-4 h-4 rounded-none bg-white border-stone-300 text-[#ff4d00] focus:ring-[#ff4d00]"
                 />
               </th>

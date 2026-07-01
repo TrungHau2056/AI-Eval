@@ -1,5 +1,46 @@
 # Changelog
 
+## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Flag & chẩn đoán persona sinh lỗi
+
+Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đạt rubric cho một intent, trước đây intent đó **âm thầm mất persona** — không cờ, không thông báo. Nay intent lỗi được **đánh dấu, hiển thị bản tốt nhất từng sinh + panel chẩn đoán** để user tự sửa; đồng thời chặn bug làm rớt persona ở bước REFINE.
+
+### Added — Tính năng mới
+- **Theo dõi "bản tốt nhất" mỗi intent qua các vòng loop** (`best_attempts`): evaluator node trích `pair_score` (0–28) vốn đã có sẵn từ LLM rồi snapshot cặp persona điểm cao nhất từng thấy cho mỗi `intent_num`. Cuối graph, intent nào còn lỗi sẽ được ghép lại bản tốt nhất này thay vì bản cuối (có thể rỗng/kém hơn).
+  `backend/src/pipeline/persona_graph.py`
+- **`failure_summary` + API `personaIssues`**: graph phát ra danh sách intent lỗi (điểm, lý do, gợi ý sửa). Thêm `PersonaAgent.run_with_diagnostics()` trả `(personas, failure_summary)` — giữ nguyên `run()` cho các caller cũ. Endpoint `/api/generate-personas` map sang `personaIssues` (keyed theo FE intent id) + trường `warning`.
+  `backend/src/pipeline/persona_generator.py`, `backend/src/api/routers/frontend_api.py`
+- **Tab Persona — dropdown chọn intent thiết kế lại + cờ + panel chẩn đoán**: thay `<select>` gốc bằng combobox tùy biến theo theme (trắng / stone-200 / bo vuông). Intent lỗi hiện icon ⚠️ + nhãn "Needs review" trong cả nút lẫn danh sách. Chọn vào intent lỗi hiện panel amber: điểm (x/28), lý do, danh sách gợi ý sửa; vẫn render cặp persona tốt nhất bên dưới nếu có.
+  `frontend/src/components/PersonaPlaygroundTab.tsx`, `frontend/src/types.ts` (thêm interface `PersonaIssue`), `frontend/src/App.tsx` (state `personaIssues`, toast `warning`)
+
+### Fixed — Sửa lỗi
+- **REFINE làm rớt persona (intent về 0 persona)**: bước REFINE trước đây **xoá cặp cũ trước khi sinh lại**; nếu LLM trả JSON bị cắt/hỏng (`_parse → []`) thì không có gì thay thế → intent mất sạch persona (vi phạm rule "đúng 2 persona/intent"). Đổi sang **merge không phá hủy**: chỉ xoá cặp cũ khi cặp mới parse thành công, ngược lại giữ nguyên bản trước đó.
+  `backend/src/pipeline/persona_graph.py`
+- **Intent thiếu persona không bị bắt**: `_apply_best_attempts` giờ phát hiện lỗi **theo cấu trúc** — đếm số persona/intent ở kết quả cuối; intent nào < 2 persona (hoặc còn trong `pairs_to_regenerate`) đều bị flag, kể cả khi evaluator không hề "thấy" nó nên không bao giờ đưa vào `pairs_to_regenerate`.
+  `backend/src/pipeline/persona_graph.py`
+- **Fallback hiện nhầm persona**: tab Persona không còn rơi vào nhánh "hiện 2 persona đầu tiên" cho intent đang bị flag (tránh hiện cặp của intent khác dưới panel chẩn đoán "0/28").
+  `frontend/src/components/PersonaPlaygroundTab.tsx`
+
+### Changed — Thay đổi
+- **Prompt sinh persona ép tiếng Việt**: thêm mục `# LANGUAGE (mandatory)` + dịch toàn bộ ví dụ R0–R4 sang tiếng Việt, để output (`trigger`/`utterance`/`pain`/`reject`/...) luôn là tiếng Việt tự nhiên — `utterance` như người thật gõ (viết tắt, không dấu); key JSON giữ tiếng Anh.
+  `backend/src/prompts/persona_generator_system.txt`
+
+### Notes — Ghi chú
+- Nguyên nhân nền khiến JSON dễ bị cắt là `max_tokens=4096` (`anthropic_client.py`, `openrouter_client.py`); hai fix trên giúp **không mất dữ liệu** khi điều này xảy ra. Cân nhắc nâng `max_tokens` (vd 8192) để LLM sinh đủ ngay từ đầu — chưa thực hiện vì ảnh hưởng chi phí/độ trễ.
+
+## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Reset workspace + UI polish
+
+### Added — Tính năng mới
+- **Modal xác nhận Reset Workspace** thay cho `confirm()` của trình duyệt. Reset nay **xoá cả crawl sheet** (`/api/crawl/posts/reset`) song song với `/api/state/reset`, và bắn `crawlResetSignal` để `DataIngestionTab` drop bản crawl đang giữ cục bộ (View Results trống, không còn feed Intent Discovery). Reset cũng clear `personaIssues` và `prdLoaded`.
+  `frontend/src/App.tsx`, `frontend/src/components/DataIngestionTab.tsx`
+
+### Changed — Thay đổi
+- **Bố cục Data Ingestion**: nút "Crawl Social Data" + "View Results" dời vào trong cột Social Crawl (dùng `mt-auto` đẩy xuống đáy); "Run Intent Discovery" thành nút chính **căn giữa**, chạy trên toàn bộ nguồn trong scope, kèm dòng helper làm rõ phạm vi.
+  `frontend/src/components/DataIngestionTab.tsx`
+- **Select-all ở Intent Curation chỉ áp cho tab đang xem** (`visibleIntents`), không chọn nhầm intent ở tab khác. `onToggleSelectAll` đổi chữ ký nhận `ids[]`.
+  `frontend/src/components/IntentCurationTab.tsx`, `frontend/src/App.tsx`
+- **OperationConsole sang theme sáng** (nền trắng, chữ stone, màu nhãn đậm hơn -400 → -600) + **thanh progress indeterminate** trượt liên tục thay cho thanh % (vì không biết trước thời lượng async op).
+  `frontend/src/components/OperationConsole.tsx`, `frontend/src/index.css`
+
 ## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Keyword coverage
 
 Làm lại bộ keyword mặc định mỗi domain để **độ phủ nhu cầu người dùng** rộng hơn khi crawl social.

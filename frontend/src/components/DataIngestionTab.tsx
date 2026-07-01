@@ -27,6 +27,8 @@ interface DataIngestionTabProps {
   onProceedToCuration?: () => void;
   onToast?: (message: string, type: "success" | "info" | "error") => void;
   prdLoaded?: boolean;
+  /** Bumped by the parent on manual workspace reset to drop the locally-held crawl sheet. */
+  crawlResetSignal?: number;
 }
 
 const SOURCE_OPTIONS = ["survey", "social", "text"];
@@ -105,6 +107,7 @@ export default function DataIngestionTab({
   onProceedToCuration,
   onToast,
   prdLoaded,
+  crawlResetSignal,
 }: DataIngestionTabProps) {
   // ---- Multi-source ingest + PRD ----
   const [logsText, setLogsText] = useState("");
@@ -169,6 +172,18 @@ export default function DataIngestionTab({
       setDiscoveryScope("data");
     }
   }, [prdAvailable, discoveryScope]);
+
+  // Parent bumps crawlResetSignal after a manual workspace reset, which also clears the
+  // persisted crawl sheet server-side — drop the locally-held copy so "View Results" empties out.
+  useEffect(() => {
+    if (!crawlResetSignal) return;
+    setCrawledPosts([]);
+    setSocialResultsText("");
+    setStagedFiles([]);
+    setPrdFile(null);
+    setLogsText("");
+    setStats(null);
+  }, [crawlResetSignal]);
 
   // Auto-populate keywords when preset domain changes.
   // Only the first CORE_KEYWORD_COUNT keywords are pre-selected (the rest stay as suggestions).
@@ -795,13 +810,55 @@ export default function DataIngestionTab({
                   </div>
                 )}
               </div>
+
+              {/* Crawl action — nằm trong cột Social Crawl nên tự hiểu thuộc về crawl; mt-auto đẩy xuống đáy lấp khoảng trống */}
+              <div className="mt-auto flex flex-col gap-2 pt-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCrawlSubmit}
+                    disabled={socialLoading}
+                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-stone-900 text-white hover:bg-stone-800 rounded-none font-bold text-[10px] uppercase tracking-[0.15em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+                  >
+                    {socialLoading ? (
+                      <>
+                        <span className="material-symbols-outlined animate-spin text-[15px]">sync</span>
+                        Crawling...
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[15px]">travel_explore</span>
+                        Crawl Social Data
+                      </>
+                    )}
+                  </button>
+
+                  {crawledPosts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSheetModalOpen(true)}
+                      className="flex items-center gap-1.5 px-5 py-3 bg-stone-100 hover:bg-stone-200 text-stone-700 font-mono text-[10px] uppercase font-bold tracking-wider rounded-none border border-stone-200 cursor-pointer transition-colors shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">table_chart</span>
+                      View Results
+                    </button>
+                  )}
+                </div>
+
+                {socialResultsText && (
+                  <p className="flex items-center gap-1.5 text-[10px] font-mono text-stone-500 animate-fadeIn">
+                    <span className="material-symbols-outlined text-[13px] text-emerald-500">check_circle</span>
+                    {socialResultsText}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Shared action footer: both run buttons */}
-          <div className="border-t border-stone-100 pt-6 flex flex-col sm:flex-row gap-4">
-            {/* Discovery group: scope toggle + Run button (single button, scope-aware) */}
-            <div className="flex-1 flex flex-col gap-2">
+          {/* Shared action footer — Run Intent Discovery centered (shared across both flows) */}
+          <div className="border-t border-stone-100 pt-6 flex flex-col items-center gap-3">
+
+            {/* Primary action: scope toggle + Run Intent Discovery, centered (acts on ALL selected sources) */}
+            <div className="w-full flex flex-col items-center gap-3">
               {/* Scope toggle — picks which flow(s) discovery acts on */}
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-stone-400 uppercase tracking-[0.2em] shrink-0">Scope</span>
@@ -834,65 +891,29 @@ export default function DataIngestionTab({
                 </div>
               </div>
 
-              {/* Run Intent Discovery (scope-aware) */}
+              {/* Run Intent Discovery (scope-aware) — dominant, centered */}
               <button
                 onClick={handleSubmit}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-3 px-8 py-3.5 bg-[#ff4d00] text-white rounded-none font-bold text-[10px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
+                className="w-full max-w-lg flex items-center justify-center gap-3 px-8 py-4 bg-[#ff4d00] text-white rounded-none font-bold text-[11px] uppercase tracking-[0.2em] hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
               >
                 {loading ? (
                   <>
-                    <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
+                    <span className="material-symbols-outlined animate-spin text-[18px]">sync</span>
                     Ingesting & Discovering Intents...
                   </>
                 ) : (
                   <>
-                    <span className="material-symbols-outlined text-[16px]">search_check</span>
+                    <span className="material-symbols-outlined text-[18px]">search_check</span>
                     Run Intent Discovery · {discoveryScope === "data" ? "Data" : discoveryScope === "prd" ? "PRD" : "Data + PRD"}
                   </>
                 )}
               </button>
-            </div>
 
-            {/* Crawl group: [Crawl Social Data] [View Results] on same row + success message below */}
-            <div className="flex-1 flex flex-col gap-2">
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCrawlSubmit}
-                  disabled={socialLoading}
-                  className="flex-1 flex items-center justify-center gap-3 px-8 py-3.5 bg-stone-900 text-white hover:bg-stone-850 rounded-none font-bold text-[10px] uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-0 shadow-sm"
-                >
-                  {socialLoading ? (
-                    <>
-                      <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                      Crawling...
-                    </>
-                  ) : (
-                    <>
-                      <span className="material-symbols-outlined text-[16px]">travel_explore</span>
-                      Crawl Social Data
-                    </>
-                  )}
-                </button>
-
-                {crawledPosts.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setIsSheetModalOpen(true)}
-                    className="flex items-center gap-1.5 px-4 py-3.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-mono text-[10px] uppercase font-bold tracking-wider rounded-none border border-stone-200 cursor-pointer transition-colors shrink-0"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">table_chart</span>
-                    View Results
-                  </button>
-                )}
-              </div>
-
-              {socialResultsText && (
-                <p className="flex items-center gap-1.5 text-[10px] font-mono text-stone-500 animate-fadeIn">
-                  <span className="material-symbols-outlined text-[13px] text-emerald-500">check_circle</span>
-                  {socialResultsText}
-                </p>
-              )}
+              {/* Helper: clarifies discovery spans every source in scope, not just PRD/documents */}
+              <p className="text-[10px] text-stone-400 font-serif italic text-center max-w-md">
+                Chạy trên toàn bộ nguồn trong scope — crawled posts, raw text, documents{prdAvailable ? " & PRD" : ""}.
+              </p>
             </div>
           </div>
 

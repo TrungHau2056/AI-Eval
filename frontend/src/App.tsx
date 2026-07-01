@@ -9,7 +9,7 @@ import PersonaPlaygroundTab from "./components/PersonaPlaygroundTab";
 import ExportTab from "./components/ExportTab";
 import RunningTestsModal from "./components/RunningTestsModal";
 import OperationConsole from "./components/OperationConsole";
-import { Intent, Persona, TestCase, IngestStats } from "./types";
+import { Intent, Persona, TestCase, IngestStats, PersonaIssue } from "./types";
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -21,6 +21,7 @@ export default function App() {
   const [aiModel, setAiModel] = useState("Gemini 1.5 Pro");
   const [intents, setIntents] = useState<Intent[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [personaIssues, setPersonaIssues] = useState<Record<string, PersonaIssue>>({});
   const [testCases, setTestCases] = useState<TestCase[]>([]);
 
   // Synchronized generation rules
@@ -50,6 +51,9 @@ export default function App() {
   // Active long-running operation (drives OperationConsole)
   const [activeOp, setActiveOp] = useState<string | null>(null);
   const [prdLoaded, setPrdLoaded] = useState(false);
+  // Bumped on manual workspace reset so DataIngestionTab drops its locally-held crawl sheet.
+  const [crawlResetSignal, setCrawlResetSignal] = useState(0);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   // Modals & alerts
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
@@ -265,8 +269,9 @@ export default function App() {
     saveStateToServer({ intents: updatedList });
   };
 
-  const handleToggleSelectAllIntents = (checked: boolean) => {
-    const updatedList = intents.map((item) => ({ ...item, selected: checked }));
+  const handleToggleSelectAllIntents = (ids: string[], checked: boolean) => {
+    const idSet = new Set(ids);
+    const updatedList = intents.map((item) => (idSet.has(item.id) ? { ...item, selected: checked } : item));
     setIntents(updatedList);
     saveStateToServer({ intents: updatedList });
   };
@@ -303,7 +308,12 @@ export default function App() {
       if (!res.ok) throw new Error("Persona generation failed");
       const data = await res.json();
       setPersonas(data.personas || []);
-      if (data.fallback) {
+      setPersonaIssues(data.personaIssues || {});
+      if (data.warning) {
+        // Generate/evaluate/refine loop gave up early on some intents (JSON parse failure
+        // or exhausted retries) — surface it instead of silently returning fewer personas.
+        showToast(data.warning, "error");
+      } else if (data.fallback) {
         showToast("Generated model test personas for active QA suite.", "info");
       } else {
         showToast("AI synthesized optimal test personas successfully!", "success");
@@ -337,6 +347,7 @@ export default function App() {
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
+      setPersonaIssues(data.personaIssues || {});
       // Find the regenerated persona matching the same type
       const matchType = target?.type || "happy";
       const updatedPersona = data.personas.find((p: Persona) => p.type === matchType) || data.personas[0];
@@ -511,19 +522,30 @@ export default function App() {
   };
 
   const handleResetWorkspace = () => {
-    if (confirm("Reset the QA compilation workspace back to default seed data?")) {
-      fetch("/api/state/reset", { method: "POST" })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) {
-            setIntents(data.state.intents || []);
-            setPersonas(data.state.personas || []);
-            setTestCases(data.state.testCases || []);
-            setCurrentStep(1);
-            showToast("Workspace was reset successfully.", "success");
-          }
-        });
-    }
+    setIsResetConfirmOpen(true);
+  };
+
+  const handleConfirmResetWorkspace = () => {
+    setIsResetConfirmOpen(false);
+    // /api/state/reset intentionally preserves the persisted crawl sheet (it also runs
+    // silently on every page load, where wiping crawled posts would be unwanted). A manual
+    // workspace reset must additionally clear it via /api/crawl/posts/reset, otherwise old
+    // crawled posts keep showing in "View Results" and still feed Intent Discovery.
+    Promise.all([
+      fetch("/api/state/reset", { method: "POST" }).then((res) => res.json()),
+      fetch("/api/crawl/posts/reset", { method: "POST" }).then((res) => res.json()),
+    ]).then(([stateData]) => {
+      if (stateData.success) {
+        setIntents(stateData.state.intents || []);
+        setPersonas(stateData.state.personas || []);
+        setPersonaIssues({});
+        setTestCases(stateData.state.testCases || []);
+        setPrdLoaded(false);
+        setCrawlResetSignal((n) => n + 1);
+        setCurrentStep(1);
+        showToast("Workspace was reset successfully.", "success");
+      }
+    });
   };
 
   // Starts active sandbox execution run of the compiled cases
@@ -611,6 +633,7 @@ export default function App() {
                 ruleText={intentRule}
                 onToast={showToast}
                 prdLoaded={prdLoaded}
+                crawlResetSignal={crawlResetSignal}
                 onOpenRuleModal={() => {
                   setActiveRuleType("intent");
                   setPromptText("");
@@ -642,6 +665,7 @@ export default function App() {
               <PersonaPlaygroundTab
                 intents={intents}
                 personas={personas}
+                personaIssues={personaIssues}
                 onUpdatePersona={handleUpdatePersona}
                 onRegeneratePersona={handleRegeneratePersona}
                 onConfirmPersonas={handleConfirmPersonas}
@@ -896,6 +920,60 @@ export default function App() {
                   className="px-6 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-[10px] uppercase tracking-wider font-mono cursor-pointer border-0"
                 >
                   Close & Save Directives
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Reset Workspace Confirm Modal */}
+      <AnimatePresence>
+        {isResetConfirmOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsResetConfirmOpen(false)}
+              className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs"
+            />
+
+            {/* Modal Box */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="bg-white border border-stone-200 shadow-2xl max-w-md w-full p-7 relative flex flex-col gap-5 rounded-none z-10"
+            >
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-[#ff4d00] text-[24px] shrink-0">restart_alt</span>
+                <div>
+                  <h3 className="text-[13px] font-bold text-stone-950 uppercase tracking-widest font-mono">
+                    Reset Workspace
+                  </h3>
+                  <p className="text-[12px] text-stone-500 font-serif italic mt-1.5 leading-normal">
+                    This clears all ingested data, crawled posts, intents, personas, and test cases back to default seed data. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-stone-100 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setIsResetConfirmOpen(false)}
+                  className="px-5 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-[10px] uppercase tracking-wider font-mono cursor-pointer border-0"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmResetWorkspace}
+                  className="px-5 py-2.5 bg-[#ff4d00] hover:opacity-90 text-white font-bold text-[10px] uppercase tracking-wider font-mono cursor-pointer border-0"
+                >
+                  Reset Workspace
                 </button>
               </div>
             </motion.div>

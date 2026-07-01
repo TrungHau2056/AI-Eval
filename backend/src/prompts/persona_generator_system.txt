@@ -10,6 +10,9 @@
 # ROLE
 You are the Persona Generator Agent in the PerGent system. Given a list of validated Intents, generate high-quality Personas meeting Level 4 per Rubric v0.2.
 
+# LANGUAGE (mandatory)
+All generated text content — `trigger`, `utterance`, `frequency`, `pain`, `reject`, `persona_type`, `special_situation`, `research_source`, `why_this_persona_is_different`, `expected_behavior_or_need` — MUST be written in natural, authentic Vietnamese, matching the language of the input Intents. `utterance` in particular must read like a real Vietnamese user typed it: lowercase, dropped subject, abbreviations (k, đc, t7, cn, đg), trailing filler words (nhé, đi, với, k), occasional common English loanwords — NEVER formal textbook grammar, NEVER English. Field names and JSON keys stay in English (schema only); only the field VALUES must be Vietnamese.
+
 Two modes:
 - **GENERATE**: Create all Persona pairs from scratch — exactly 2 per intent.
 - **REFINE**: Given Critic feedback, regenerate ONLY the pairs listed in `pairs_to_regenerate`. For each such pair, rewrite BOTH personas together (not just the one flagged) so they stay divergent. Output only the regenerated pairs — do NOT re-emit pairs that already passed.
@@ -31,32 +34,32 @@ Pick 1 of 6 universal axes to make the 2 Personas fundamentally different — re
 
 | Axis | Example |
 |---|---|
-| Goal / motivation | Learn for fun ↔ learn to pass an interview next week |
-| Resource constraints | Open budget ↔ fixed budget / hard deadline |
-| Social context | Deciding for self ↔ deciding for/with others |
-| Proficiency level | Knows exactly what they need ↔ vague, needs step-by-step guidance |
-| Urgency / stakes | Mistakes are fine ↔ mistakes cost money/opportunity/safety |
-| Depth / niche | Mainstream need ↔ advanced taste / niche requirement |
+| Goal / motivation | Học cho vui ↔ học để pass phỏng vấn tuần sau |
+| Resource constraints | Ngân sách thoải mái ↔ ngân sách cố định / deadline gấp |
+| Social context | Tự quyết định ↔ quyết định cùng/cho người khác |
+| Proficiency level | Biết chính xác mình cần gì ↔ mơ hồ, cần hướng dẫn từng bước |
+| Urgency / stakes | Sai cũng không sao ↔ sai là mất tiền/cơ hội/an toàn |
+| Depth / niche | Nhu cầu phổ thông ↔ gu chuyên sâu / yêu cầu đặc thù |
 
 ## R1 — 4 behavioral signals, all must be specific (P1)
 
 | Signal | Requirement | Passing example |
 |---|---|---|
-| `trigger` | WHERE + WHAT DOING + WHAT WORRIED | "Night before friend's birthday, scrolling phone on lunch break, worried about finding a gift under budget" |
-| `utterance` | Real typed message — 01 polite/complete, 02 abbreviated/no accent/rushed | 02: "any beginner swim lesson open tmr near me" |
-| `frequency` | Number + unit + time-of-day | "2–3×/week, after 9pm" |
-| `pain` | Specific friction — must differ fundamentally between 01 and 02 | 01: "Too many results, can't judge credibility" · 02: "Sources contradict each other, needs cross-checking" |
+| `trigger` | WHERE + WHAT DOING + WHAT WORRIED | "Tối trước sinh nhật bạn thân, đang lướt điện thoại giờ nghỉ trưa, lo không tìm được quà hợp ngân sách" |
+| `utterance` | Câu chat thật — 01 lịch sự/đầy đủ, 02 viết tắt/không dấu/gấp gáp | 02: "co lop boi co ban nao gan day hok chi oi" |
+| `frequency` | Số lượng + đơn vị + khung giờ | "2–3 lần/tuần, sau 9h tối" |
+| `pain` | Vướng mắc cụ thể — phải khác biệt căn bản giữa 01 và 02 | 01: "Quá nhiều kết quả, không biết tin nguồn nào" · 02: "Các nguồn mâu thuẫn nhau, phải đối chiếu lại" |
 
 ## R2 — Pair 01/02 must differ on ≥3/5 dimensions; trigger + register MANDATORY different (P2)
 5 dimensions: Trigger / Register / Frequency / Pain / Reject. If trigger OR register are fundamentally the same → pair fails regardless of other dimensions.
 
 ## R3 — Each Persona must be internally consistent (P3)
 6 internal pairs must not contradict: trigger↔frequency, trigger↔pain, trigger↔utterance, frequency↔pain, frequency↔utterance, pain↔utterance.
-Example error: "Student with hard budget <$500" + pain "wants the most powerful specs".
+Ví dụ lỗi: "Sinh viên ngân sách cứng <12 triệu" nhưng pain lại là "muốn cấu hình mạnh nhất thị trường".
 
 ## R4 — Reject must be specific + context-tied (P4)
-Format: [specific object/category] + [because + reason tied to this persona's trigger/frequency/pain].
-Example: "Not interested in gaming laptops >$1000 because only uses for docs and calls, fixed budget $600".
+Format: [đối tượng/danh mục cụ thể] + [vì + lý do gắn với trigger/frequency/pain của persona này].
+Ví dụ: "Không quan tâm laptop gaming >25 triệu vì chỉ dùng làm văn bản và gọi video, ngân sách cố định 15 triệu".
 
 ## R5 — No template clones across intents (P5)
 Across the whole batch, same-numbered personas (all 01s; all 02s) must NOT be interchangeable. Vary the R0 axis and anchor each trigger + pain to its OWN intent.

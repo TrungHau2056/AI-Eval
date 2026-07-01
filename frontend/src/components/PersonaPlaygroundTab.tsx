@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Intent, Persona } from "../types";
+import { Intent, Persona, PersonaIssue } from "../types";
 import AutoTextarea from "./AutoTextarea";
 import { downloadPersonasJson, downloadPersonasCsv } from "../utils/exportPersonas";
 
 interface PersonaPlaygroundTabProps {
   intents: Intent[];
   personas: Persona[];
+  personaIssues: Record<string, PersonaIssue>;
   onUpdatePersona: (id: string, updated: Partial<Persona>) => void;
   onRegeneratePersona: (id: string, feedback?: string) => Promise<void>;
   onConfirmPersonas: () => void;
@@ -16,6 +17,7 @@ interface PersonaPlaygroundTabProps {
 export default function PersonaPlaygroundTab({
   intents,
   personas,
+  personaIssues,
   onUpdatePersona,
   onRegeneratePersona,
   onConfirmPersonas,
@@ -26,6 +28,7 @@ export default function PersonaPlaygroundTab({
   const [compiling, setCompiling] = useState(false);
   const [feedbackMap, setFeedbackMap] = useState<{ [id: string]: string }>({});
   const [showFeedbackMap, setShowFeedbackMap] = useState<{ [id: string]: boolean }>({});
+  const [showIntentDropdown, setShowIntentDropdown] = useState(false);
 
   const activeIntents = intents.filter((i) => i.selected);
   const displayIntents = activeIntents.length > 0 ? activeIntents : intents;
@@ -41,6 +44,7 @@ export default function PersonaPlaygroundTab({
   }, [displayIntents, selectedIntentId]);
 
   const selectedIntent = displayIntents.find((i) => i.id === selectedIntentId);
+  const selectedIntentIssue = selectedIntentId ? personaIssues[selectedIntentId] : undefined;
 
   const handleRegen = async (id: string, feedback?: string) => {
     setLoadingMap((prev) => ({ ...prev, [id]: true }));
@@ -74,8 +78,9 @@ export default function PersonaPlaygroundTab({
     filteredPersonas = personas.filter((p) => p.name.includes(selectedIntentObj.name));
   }
 
-  // Final fallback: show first 2 personas
-  if (filteredPersonas.length === 0 && personas.length > 0) {
+  // Final fallback: show first 2 personas — but NOT when this intent is flagged with
+  // an issue, since that would surface an unrelated intent's pair under its diagnostic.
+  if (filteredPersonas.length === 0 && personas.length > 0 && !selectedIntentIssue) {
     filteredPersonas = personas.slice(0, 2);
   }
 
@@ -303,19 +308,90 @@ export default function PersonaPlaygroundTab({
             <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">download</span>
             Export CSV
           </button>
-          <select
-            value={selectedIntentId}
-            onChange={(e) => setSelectedIntentId(e.target.value)}
-            className="bg-stone-50 border border-stone-300 rounded-none px-4 py-2.5 text-[12.5px] font-semibold text-stone-800 focus:ring-1 focus:ring-[#ff4d00] focus:border-[#ff4d00] outline-none tracking-wider custom-scrollbar cursor-pointer"
-          >
-            {displayIntents.map((intent) => (
-              <option key={intent.id} value={intent.id}>
-                [{intent.phase}] {intent.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowIntentDropdown(!showIntentDropdown)}
+              className="min-w-[260px] bg-white border border-stone-200 hover:border-stone-300 px-4 py-2.5 flex items-center justify-between gap-3 text-left cursor-pointer transition-all"
+            >
+              <span className="flex items-center gap-2 text-[12px] font-semibold text-stone-800 tracking-wider truncate">
+                {selectedIntentIssue && (
+                  <span className="material-symbols-outlined text-[15px] text-amber-500 shrink-0">warning</span>
+                )}
+                <span className="truncate">
+                  {selectedIntent ? `[${selectedIntent.phase}] ${selectedIntent.name}` : "Select intent..."}
+                </span>
+              </span>
+              <span className="material-symbols-outlined text-[18px] text-stone-400 shrink-0">
+                {showIntentDropdown ? "keyboard_arrow_up" : "keyboard_arrow_down"}
+              </span>
+            </button>
+
+            {showIntentDropdown && (
+              <div className="absolute top-[100%] right-0 z-50 mt-1 w-[340px] bg-white border border-stone-200 shadow-lg max-h-[320px] overflow-y-auto custom-scrollbar">
+                <div className="p-1">
+                  {displayIntents.map((intent) => {
+                    const issue = personaIssues[intent.id];
+                    const isSelected = intent.id === selectedIntentId;
+                    return (
+                      <button
+                        key={intent.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedIntentId(intent.id);
+                          setShowIntentDropdown(false);
+                        }}
+                        className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 hover:bg-stone-50 transition-colors ${
+                          isSelected ? "bg-[#ff4d00]/5 text-[#ff4d00]" : "text-stone-700"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          {issue && (
+                            <span className="material-symbols-outlined text-[14px] text-amber-500 shrink-0">warning</span>
+                          )}
+                          <span className="text-[11px] font-bold tracking-wider truncate">
+                            [{intent.phase}] {intent.name}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          {issue && (
+                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8.5px] font-mono uppercase font-bold tracking-wider">
+                              Needs review
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="material-symbols-outlined text-[16px] text-[#ff4d00]">check</span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Diagnostic panel — shown for an intent whose persona pair never passed evaluation */}
+      {selectedIntentIssue && (
+        <div className="bg-amber-50 border border-amber-300 rounded-none p-5 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-amber-600 text-[18px]">warning</span>
+            <span className="text-[10.5px] font-mono uppercase tracking-widest font-bold text-amber-700">
+              Persona chưa đạt rubric — đang hiển thị bản tốt nhất ({selectedIntentIssue.score}/{selectedIntentIssue.maxScore} điểm)
+            </span>
+          </div>
+          <p className="text-[12px] text-stone-700 font-serif">{selectedIntentIssue.reason}</p>
+          {selectedIntentIssue.fixes.length > 0 && (
+            <ul className="list-disc list-inside text-[11px] text-stone-600 space-y-1">
+              {selectedIntentIssue.fixes.map((f, i) => (
+                <li key={i}>{f}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Persona Cards Grid */}
       {filteredPersonas.length > 0 ? (
@@ -323,11 +399,11 @@ export default function PersonaPlaygroundTab({
           {renderPersonaCard(personaA, "Persona A (Happy-path)", true)}
           {renderPersonaCard(personaB, "Persona B (Edge-case)", false)}
         </div>
-      ) : (
+      ) : !selectedIntentIssue ? (
         <div className="bg-white border border-stone-200 rounded-none shadow-sm p-12 text-center text-stone-400 font-serif italic">
           No personas generated yet for this intent. Generate personas first.
         </div>
-      )}
+      ) : null}
 
       {/* Confirmation Bottom Panel */}
       <div className="flex flex-col items-center pt-4 select-none">

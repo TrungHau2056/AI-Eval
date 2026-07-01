@@ -20,6 +20,9 @@ from src.prompts.loader import (
 logger = logging.getLogger(__name__)
 
 
+PAIR_MAX_SCORE = 28  # P1(0-4 avg)*3 + P2(0/8) + P3(0-4) + P4(0-4), per persona_evaluator_system.txt
+
+
 class PersonaGraphState(TypedDict, total=False):
     intents: list[Intent]
     guidance: str
@@ -34,6 +37,8 @@ class PersonaGraphState(TypedDict, total=False):
     history: list[dict[str, Any]]
     trace_id: str
     parent_span_id: str
+    best_attempts: dict[int, dict[str, Any]]
+    failure_summary: list[dict[str, Any]]
 
 
 def _strip_code_fences(raw: str) -> str:
@@ -209,11 +214,25 @@ class PersonaGeneratorNode:
             )
 
         if is_refine:
-            merged = [p for p in existing_personas if (p.get("intent_num") or 0) not in pairs_to_regenerate]
+            # Non-destructive merge: only drop an old pair if the REFINE pass actually
+            # produced a replacement for it. If the LLM returned truncated/invalid JSON
+            # (_parse -> []) or skipped a pair, KEEP the previous personas instead of
+            # silently leaving that intent with zero personas. The rule mandates exactly
+            # 2 personas per intent, so a pair must never vanish just because a retry failed.
+            regenerated_nums = {(p.get("intent_num") or 0) for p in new_personas}
+            dropped = [n for n in pairs_to_regenerate if n not in regenerated_nums]
+            merged = [p for p in existing_personas if (p.get("intent_num") or 0) not in regenerated_nums]
             merged.extend(new_personas)
             personas = merged
-            logger.info("PersonaGeneratorNode | REFINE merged | new=%d | kept=%d | total=%d",
-                        len(new_personas), len(merged) - len(new_personas), len(personas))
+            logger.info(
+                "PersonaGeneratorNode | REFINE merged | new=%d | regenerated_intents=%s | kept_failed_intents=%s | total=%d",
+                len(new_personas), sorted(regenerated_nums), dropped, len(personas),
+            )
+            if dropped:
+                logger.warning(
+                    "PersonaGeneratorNode | REFINE produced no valid personas for intents %s — keeping previous attempt to avoid empty pairs",
+                    dropped,
+                )
         else:
             personas = new_personas
             logger.info("PersonaGeneratorNode parsed %d personas", len(personas))
@@ -385,10 +404,15 @@ class PersonaEvaluatorNode:
                 intents, personas, trace_id, parent_span_id, iteration, max_iterations,
             )
 
+        best_attempts = self._update_best_attempts(
+            state.get("best_attempts", {}), personas, evaluation.get("pair_results", []), iteration,
+        )
+
         return {
             "evaluation": evaluation,
             "revision_guidance": evaluation.get("revision_guidance", ""),
             "pairs_to_regenerate": evaluation.get("pairs_to_regenerate", []),
+            "best_attempts": best_attempts,
             "history": state.get("history", []) + [
                 {
                     "agent": "persona_evaluator",
@@ -400,6 +424,44 @@ class PersonaEvaluatorNode:
                 }
             ],
         }
+
+    @staticmethod
+    def _update_best_attempts(
+        previous: dict[int, dict[str, Any]],
+        personas: list[dict[str, Any]],
+        pair_results: list[dict[str, Any]],
+        iteration: int,
+    ) -> dict[int, dict[str, Any]]:
+        best_attempts = dict(previous)
+        for pr in pair_results:
+            if not isinstance(pr, dict):
+                continue
+            inum = _coerce_int(pr.get("intent_num"))
+            if not inum:
+                continue
+            score = _coerce_int(pr.get("pair_score"))
+            prior_best = best_attempts.get(inum)
+            if prior_best is not None and prior_best.get("score", -1) >= score:
+                continue
+            pair_personas = [p for p in personas if (p.get("intent_num") or 0) == inum]
+            if not pair_personas:
+                continue
+            issues: list[str] = []
+            persona_issues = pr.get("persona_issues", {})
+            if isinstance(persona_issues, dict):
+                for msgs in persona_issues.values():
+                    if isinstance(msgs, list):
+                        issues.extend(str(m) for m in msgs if m)
+            fixes = pr.get("fixes", [])
+            best_attempts[inum] = {
+                "score": score,
+                "personas": pair_personas,
+                "fixes": [str(f) for f in fixes if f] if isinstance(fixes, list) else [],
+                "issues": issues,
+                "failed_criteria": pr.get("failed_criteria", []) if isinstance(pr.get("failed_criteria"), list) else [],
+                "iteration": iteration,
+            }
+        return best_attempts
 
     async def _evaluate_with_llm(
         self,
@@ -664,6 +726,8 @@ class PersonaGenerationGraph:
             "history": [],
             "trace_id": trace_id or "",
             "parent_span_id": "",
+            "best_attempts": {},
+            "failure_summary": [],
         }
         with langfuse_observation(
             "persona-generation-graph",
@@ -689,6 +753,7 @@ class PersonaGenerationGraph:
                 initial_state["parent_span_id"],
             )
             final_state = await self.graph.ainvoke(initial_state)
+            self._apply_best_attempts(final_state)
             evaluation = final_state.get("evaluation", {})
             root_span.update(
                 output={
@@ -701,3 +766,68 @@ class PersonaGenerationGraph:
                 }
             )
             return final_state
+
+    @staticmethod
+    def _apply_best_attempts(final_state: PersonaGraphState) -> None:
+        intents = final_state.get("intents", [])
+        personas = final_state.get("personas", [])
+        best_attempts = final_state.get("best_attempts", {})
+
+        # An intent is "problematic" if the evaluator never cleared it (still in
+        # pairs_to_regenerate) OR if the final output simply doesn't contain a full
+        # pair for it (the generator under-produced / a REFINE merge dropped it).
+        # The second case never appears in pairs_to_regenerate because the evaluator
+        # only sees the personas that actually exist — so it must be detected here
+        # by counting personas per intent_num.
+        unresolved = [
+            _coerce_int(i) for i in final_state.get("evaluation", {}).get("pairs_to_regenerate", [])
+        ]
+
+        counts: dict[int, int] = {}
+        for p in personas:
+            inum = p.get("intent_num") or 0
+            if inum:
+                counts[inum] = counts.get(inum, 0) + 1
+
+        expected = [(i.intent_num or idx + 1) for idx, i in enumerate(intents)]
+        problematic: list[int] = []
+        for inum in expected:
+            if inum in problematic:
+                continue
+            if inum in unresolved or counts.get(inum, 0) < 2:
+                problematic.append(inum)
+
+        if not problematic:
+            final_state["failure_summary"] = []
+            return
+
+        failure_summary: list[dict[str, Any]] = []
+        for inum in problematic:
+            best = best_attempts.get(inum)
+            if best and best.get("personas"):
+                personas = [p for p in personas if (p.get("intent_num") or 0) != inum] + best["personas"]
+                failure_summary.append({
+                    "intent_num": inum,
+                    "score": best.get("score", 0),
+                    "max_score": PAIR_MAX_SCORE,
+                    "fixes": best.get("fixes", []),
+                    "issues": best.get("issues", []),
+                    "iteration": best.get("iteration", final_state.get("iteration", 0)),
+                })
+            else:
+                failure_summary.append({
+                    "intent_num": inum,
+                    "score": 0,
+                    "max_score": PAIR_MAX_SCORE,
+                    "fixes": [],
+                    "issues": ["AI khong sinh duoc persona hop le cho intent nay sau nhieu lan thu."],
+                    "iteration": final_state.get("iteration", 0),
+                })
+
+        final_state["personas"] = personas
+        final_state["failure_summary"] = failure_summary
+        logger.warning(
+            "PersonaGenerationGraph | problematic=%s | unresolved=%s | counts=%s | best_attempts_used=%d | failure_summary=%d",
+            problematic, unresolved, counts,
+            sum(1 for inum in problematic if best_attempts.get(inum)), len(failure_summary),
+        )
