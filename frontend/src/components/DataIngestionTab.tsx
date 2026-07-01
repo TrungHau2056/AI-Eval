@@ -992,7 +992,15 @@ export default function DataIngestionTab({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200">
-                      {crawledPosts.map((post, idx) => {
+                      {crawledPosts
+                        .map((post: any, idx: number) => ({ post, idx }))
+                        .sort((a: { post: any }, b: { post: any }) => {
+                          // Sort by likes first, then comments (most engaged on top).
+                          const likeDiff = (b.post.likes || 0) - (a.post.likes || 0);
+                          if (likeDiff !== 0) return likeDiff;
+                          return (b.post.commentsCount || 0) - (a.post.commentsCount || 0);
+                        })
+                        .map(({ post, idx }: { post: any; idx: number }) => {
                         const hasEngagements = post.likes !== undefined || post.commentsCount !== undefined;
                         return (
                           <tr key={idx} className="hover:bg-stone-50/50 transition-colors">
