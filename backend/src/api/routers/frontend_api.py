@@ -725,6 +725,7 @@ def generate_personas(req: GeneratePersonasRequest):
     intent_num_to_name = {i.intent_num or idx + 1: i.intent_name for idx, i in enumerate(internal_intents)}
     persona_issues: dict[str, dict] = {}
     short_names: list[str] = []
+    max_persona_iterations = agent.max_iterations
     for entry in failure_summary:
         inum = entry.get("intent_num")
         name = intent_num_to_name.get(inum, "")
@@ -735,7 +736,7 @@ def generate_personas(req: GeneratePersonasRequest):
         fixes = entry.get("fixes", [])
         issues = entry.get("issues", [])
         reason = (
-            f"Chưa đạt rubric sau {entry.get('iteration', 0)}/5 vòng thử "
+            f"Chưa đạt rubric sau {entry.get('iteration', 0)}/{max_persona_iterations} vòng thử "
             f"({entry.get('score', 0)}/{entry.get('max_score', 28)} điểm)."
         )
         persona_issues[fe_id] = {

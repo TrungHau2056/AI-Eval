@@ -9,6 +9,8 @@ import asyncio
 import logging
 from typing import Callable
 
+from src.config import settings
+
 from ..llm.base import PersonaAgentLLMBase
 from ..schemas.models import (
     AgentLoopResult,
@@ -26,18 +28,18 @@ class PersonaAgentRunner:
     Runner xử lý nhiều intent qua agent loop.
 
     Usage:
-        runner = PersonaAgentRunner(llm=client, max_iterations=5)
+        runner = PersonaAgentRunner(llm=client)
         result = await runner.run_all(intents, rubric)
     """
 
     def __init__(
         self,
         llm: PersonaAgentLLMBase,
-        max_iterations: int = 5,
+        max_iterations: int | None = None,
         on_progress: Callable[[str], None] | None = None,
     ):
         self.llm = llm
-        self.max_iterations = max_iterations
+        self.max_iterations = max_iterations if max_iterations is not None else settings.persona_max_iterations
         self.on_progress = on_progress or (lambda msg: None)
 
     async def run_all(

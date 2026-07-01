@@ -13,6 +13,8 @@ import uuid
 from typing import Any
 from pydantic import BaseModel, Field
 
+from src.config import settings
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex[:8]
@@ -138,7 +140,7 @@ class AgentLoopState(BaseModel):
     current_drafts: list[PersonaDraft] = Field(default_factory=list)
     evaluations: list[PersonaEvaluation] = Field(default_factory=list)
     iteration: int = Field(default=0)
-    max_iterations: int = Field(default=5)
+    max_iterations: int = Field(default=settings.persona_max_iterations)
     passed: bool = False
     history: list[dict[str, Any]] = Field(
         default_factory=list,
