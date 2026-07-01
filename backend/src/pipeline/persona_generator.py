@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from src.config import settings
 from src.llm.base import LLMClient
 from src.memory.base import BaseMemory
 from src.memory.conversation_memory import ConversationMemory
@@ -15,13 +16,13 @@ class PersonaAgent:
         self,
         llm: LLMClient,
         memory: BaseMemory | None = None,
-        max_iterations: int = 5,
-        pass_threshold: float = 0.75,
+        max_iterations: int | None = None,
+        pass_threshold: float | None = None,
     ):
         self.llm = llm
         self.memory = memory or ConversationMemory()
-        self.max_iterations = max_iterations
-        self.pass_threshold = pass_threshold
+        self.max_iterations = max_iterations if max_iterations is not None else settings.persona_max_iterations
+        self.pass_threshold = pass_threshold if pass_threshold is not None else settings.persona_pass_threshold
 
     async def run(self, intents: list[Intent], guidance: str = "", trace_id: str | None = None) -> list[dict[str, Any]]:
         logger.info("PersonaAgent.run() | num_intents=%d | guidance=%s", len(intents), bool(guidance))

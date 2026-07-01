@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from src.config import settings
 from src.llm.base import LLMClient
 from src.models.schemas import Intent, Persona
 from src.observability.langfuse import capture_io_enabled, langfuse_observation
@@ -349,9 +350,9 @@ class PersonaGeneratorNode:
 
 
 class PersonaEvaluatorNode:
-    def __init__(self, llm: LLMClient, pass_threshold: float = 0.75):
+    def __init__(self, llm: LLMClient, pass_threshold: float | None = None):
         self.llm = llm
-        self.pass_threshold = pass_threshold
+        self.pass_threshold = pass_threshold if pass_threshold is not None else settings.persona_pass_threshold
 
     async def run(self, state: PersonaGraphState) -> dict[str, Any]:
         intents = state.get("intents", [])
@@ -359,7 +360,7 @@ class PersonaEvaluatorNode:
         trace_id = state.get("trace_id") or None
         parent_span_id = state.get("parent_span_id") or None
         iteration = state.get("iteration", 0)
-        max_iterations = state.get("max_iterations", 5)
+        max_iterations = state.get("max_iterations", settings.persona_max_iterations)
 
         previous_evaluation = state.get("evaluation", {})
         previous_failed = previous_evaluation.get("pairs_to_regenerate", [])
@@ -408,9 +409,10 @@ class PersonaEvaluatorNode:
         trace_id: str | None = None,
         parent_span_id: str | None = None,
         iteration: int = 0,
-        max_iterations: int = 5,
+        max_iterations: int | None = None,
         passed_personas: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        max_iterations = max_iterations if max_iterations is not None else settings.persona_max_iterations
         if passed_personas:
             passed_context = (
                 "\n**Personas da PASS (chi dung cho P5 cross-pair check, KHONG danh gia lai P1-P4):**\n"
@@ -556,7 +558,7 @@ class PersonaOrchestratorNode:
         personas = state.get("personas", [])
         evaluation = state.get("evaluation", {})
         iteration = state.get("iteration", 0)
-        max_iterations = state.get("max_iterations", 5)
+        max_iterations = state.get("max_iterations", settings.persona_max_iterations)
         trace_id = state.get("trace_id") or None
         parent_span_id = state.get("parent_span_id") or None
         pairs_to_regenerate = evaluation.get("pairs_to_regenerate", [])
@@ -615,12 +617,12 @@ class PersonaGenerationGraph:
     def __init__(
         self,
         llm: LLMClient,
-        max_iterations: int = 5,
-        pass_threshold: float = 0.75,
+        max_iterations: int | None = None,
+        pass_threshold: float | None = None,
     ):
         self.llm = llm
-        self.max_iterations = max_iterations
-        self.pass_threshold = pass_threshold
+        self.max_iterations = max_iterations if max_iterations is not None else settings.persona_max_iterations
+        self.pass_threshold = pass_threshold if pass_threshold is not None else settings.persona_pass_threshold
         self.graph = self._build_graph()
 
     def _build_graph(self):
