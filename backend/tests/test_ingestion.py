@@ -10,6 +10,7 @@ from src.ingestion.json_loader import JsonLoader
 from src.ingestion.loader_factory import get_loader
 from src.ingestion.markdown_loader import MarkdownLoader, strip_markdown
 from src.ingestion.normalizer import merge_sources, normalize
+from src.ingestion.pdf_loader import PdfLoader
 from src.ingestion.prd_loader import PRDLoader
 from src.ingestion.social_loader import SocialLoader
 from src.models.schemas import RawInput
@@ -22,6 +23,16 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 def _open(name: str) -> io.BytesIO:
     with open(os.path.join(FIXTURES, name), "rb") as f:
         return io.BytesIO(f.read())
+
+
+def _pdf(text: str) -> io.BytesIO:
+    fitz = pytest.importorskip("fitz")
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), text)
+    raw = doc.tobytes()
+    doc.close()
+    return io.BytesIO(raw)
 
 
 # ---------- Loaders ----------
@@ -56,7 +67,17 @@ def test_markdown_loader_strips_syntax():
 
 def test_loader_factory_by_extension():
     assert isinstance(get_loader(filename="a.xlsx", uploaded_file=_open("sample_survey.xlsx")), ExcelLoader)
+    assert isinstance(get_loader(filename="notes.pdf", uploaded_file=_pdf("PDF data")), PdfLoader)
+    assert isinstance(get_loader(source_type="text", filename="notes.pdf", uploaded_file=_pdf("PDF data")), PdfLoader)
     assert isinstance(get_loader(source_type="prd", filename="p.md", uploaded_file=_open("sample_prd.md")), PRDLoader)
+
+
+def test_pdf_loader_extracts_text():
+    result = PdfLoader(_pdf("Refund policy and booking changes"), "sample.pdf").load()
+    assert result.source_type == "text"
+    assert "Refund policy" in result.content
+    assert result.metadata["filetype"] == "pdf"
+    assert result.metadata["pages"] == 1
 
 
 def test_loader_factory_social():
@@ -93,6 +114,13 @@ def test_prd_loader_content():
     assert ri.source_type == "prd"
     assert "Đặt lịch lái thử" in ri.content
     assert "#" not in ri.content  # đã strip cú pháp markdown
+
+
+def test_prd_loader_pdf_content():
+    ri = PRDLoader(_pdf("Travel assistant PRD requirements"), "prd.pdf").load()
+    assert ri.source_type == "prd"
+    assert "Travel assistant" in ri.content
+    assert ri.metadata["filetype"] == "pdf"
 
 
 # ---------- Normalizer ----------

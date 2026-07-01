@@ -6,6 +6,7 @@ from src.ingestion.csv_loader import CSVLoader
 from src.ingestion.excel_loader import ExcelLoader
 from src.ingestion.json_loader import JsonLoader
 from src.ingestion.markdown_loader import MarkdownLoader
+from src.ingestion.pdf_loader import PdfLoader
 from src.ingestion.prd_loader import PRDLoader
 from src.ingestion.social_loader import SocialLoader
 from src.ingestion.text_loader import TextLoader
@@ -20,7 +21,10 @@ _EXT_LOADERS: dict[str, type[DataIngestion]] = {
     ".md": MarkdownLoader,
     ".markdown": MarkdownLoader,
     ".txt": MarkdownLoader,
+    ".pdf": PdfLoader,
 }
+
+_TEXT_FILE_EXTS = {".md", ".markdown", ".txt", ".pdf"}
 
 
 def get_loader(
@@ -41,6 +45,9 @@ def get_loader(
     if st == "prd":
         return PRDLoader(uploaded_file, filename)
     if st == "text":
+        ext = os.path.splitext(filename)[1].lower()
+        if uploaded_file is not None and ext in _TEXT_FILE_EXTS:
+            return _EXT_LOADERS[ext](uploaded_file, filename)
         return TextLoader(text)
     if st == "social":
         return SocialLoader(uploaded_file, filename)

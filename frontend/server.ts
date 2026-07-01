@@ -1,13 +1,19 @@
 import express from "express";
 import path from "path";
+import { createServer as createHttpServer } from "http";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import { fileURLToPath } from "url";
 
+const serverDir = path.dirname(fileURLToPath(import.meta.url));
+
+dotenv.config({ path: path.resolve(serverDir, ".env") });
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8001";
 
 // Capture raw body as Buffer for ALL content types (JSON, multipart, binary)
 // so the proxy can forward uploads (multipart/form-data) untouched.
@@ -57,10 +63,46 @@ app.all("/api/*", async (req, res) => {
   }
 });
 
+function listenOnAvailablePort(
+  server: ReturnType<typeof createHttpServer>,
+  startPort: number,
+  attempts = 10,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tryListen = (port: number, remaining: number) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        server.off("listening", onListening);
+        if (err.code === "EADDRINUSE" && remaining > 0) {
+          console.warn(`Port ${port} is already in use; trying ${port + 1}...`);
+          tryListen(port + 1, remaining - 1);
+          return;
+        }
+        reject(err);
+      };
+
+      const onListening = () => {
+        server.off("error", onError);
+        resolve(port);
+      };
+
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, HOST);
+    };
+
+    tryListen(startPort, attempts);
+  });
+}
+
 async function startServer() {
+  const httpServer = createHttpServer(app);
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -72,10 +114,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Frontend server running on http://localhost:${PORT}`);
-    console.log(`Proxying /api/* to ${BACKEND_URL}`);
-  });
+  const activePort = await listenOnAvailablePort(httpServer, PORT);
+  console.log(`Frontend server running on http://localhost:${activePort}`);
+  console.log(`Proxying /api/* to ${BACKEND_URL}`);
 }
 
-startServer();
+startServer().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`Frontend server failed to start: ${message}`);
+  process.exit(1);
+});

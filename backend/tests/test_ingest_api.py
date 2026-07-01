@@ -16,6 +16,18 @@ def _fixture_bytes(name: str) -> bytes:
         return f.read()
 
 
+def _pdf_bytes(text: str) -> bytes:
+    import pytest
+
+    fitz = pytest.importorskip("fitz")
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), text)
+    raw = doc.tobytes()
+    doc.close()
+    return raw
+
+
 def test_ingest_survey_and_prd():
     reset_state()
     files = [
@@ -61,6 +73,59 @@ def test_ingest_social_json():
     state = get_state()
     assert "Kia Morning" in state.raw_input.content
     assert "[social:facebook]" in state.raw_input.content
+
+
+def test_ingest_pdf_text():
+    reset_state()
+    files = [("files", ("notes.pdf", _pdf_bytes("Refund policy and booking changes"), "application/pdf"))]
+    data = {"types": ["text"]}
+    res = client.post("/api/ingest", files=files, data=data)
+    assert res.status_code == 200
+    body = res.json()
+    assert any(s["source_type"] == "text" and s["status"] == "ok" for s in body["sources"])
+
+    state = get_state()
+    assert "Refund policy" in state.raw_input.content
+
+
+def test_prd_preview_after_pdf_ingest():
+    reset_state()
+    files = [("prd_file", ("prd.pdf", _pdf_bytes("Travel assistant PRD requirements"), "application/pdf"))]
+    res = client.post("/api/ingest", files=files)
+    assert res.status_code == 200
+
+    preview = client.get("/api/prd/preview").json()
+    assert preview["loaded"] is True
+    assert preview["filename"] == "prd.pdf"
+    assert preview["metadata"]["filetype"] == "pdf"
+    assert "Travel assistant" in preview["content"]
+    assert "Travel assistant" in preview["preview"]
+
+
+def test_prd_upload_endpoint_and_preview():
+    reset_state()
+    files = {"prd_file": ("prd.pdf", _pdf_bytes("Standalone PRD upload"), "application/pdf")}
+    res = client.post("/api/prd/upload", files=files)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["prd_loaded"] is True
+    assert body["filename"] == "prd.pdf"
+
+    preview = client.get("/api/prd/preview").json()
+    assert preview["loaded"] is True
+    assert "Standalone PRD" in preview["content"]
+
+
+def test_ingest_ignores_swagger_empty_files_field():
+    reset_state()
+    files = [("prd_file", ("prd.pdf", _pdf_bytes("Swagger PRD upload"), "application/pdf"))]
+    res = client.post("/api/ingest", files=files, data={"files": "", "types": ""})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["prd_loaded"] is True
+
+    preview = client.get("/api/prd/preview").json()
+    assert "Swagger PRD upload" in preview["content"]
 
 
 def test_ingest_then_skip_warns_but_keeps_valid():

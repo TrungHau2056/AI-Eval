@@ -363,6 +363,51 @@ def get_state_endpoint():
     }
 
 
+@router.get("/api/prd/preview")
+def get_prd_preview(preview_chars: int = 5000):
+    """Return the current extracted PRD text for Swagger/debug inspection."""
+    logger.info("GET /api/prd/preview")
+    state = get_state()
+    content = state.raw_prd_content or ""
+    normalized_preview_chars = max(0, min(preview_chars, 50000))
+    stripped = content.strip()
+    return {
+        "loaded": bool(stripped),
+        "filename": state.raw_prd_metadata.get("filename", ""),
+        "metadata": state.raw_prd_metadata,
+        "charCount": len(content),
+        "lineCount": len(content.splitlines()) if content else 0,
+        "contentHash": hashlib.md5(content.encode()).hexdigest() if content else "",
+        "previewChars": normalized_preview_chars,
+        "preview": content[:normalized_preview_chars],
+        "content": content,
+    }
+
+
+@router.post("/api/prd/upload")
+async def upload_prd_file(prd_file: UploadFile = File(...)):
+    """Upload a PRD file only, then store extracted text for preview/discovery."""
+    logger.info("POST /api/prd/upload | filename=%s", prd_file.filename)
+    state = get_state()
+    filename = prd_file.filename or "prd"
+    raw_bytes = await prd_file.read()
+    try:
+        ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
+    except Exception as exc:
+        logger.warning("Upload PRD failed %s: %s", filename, exc)
+        raise HTTPException(400, f"{filename}: {exc}") from exc
+
+    state.raw_prd_content = ri.content
+    state.raw_prd_metadata = {**ri.metadata, "filename": filename}
+    return {
+        "prd_loaded": True,
+        "filename": filename,
+        "metadata": state.raw_prd_metadata,
+        "total_chars": len(ri.content),
+        "preview": ri.content[:5000],
+    }
+
+
 @router.post("/api/state")
 def update_state(body: StateUpdateRequest):
     logger.info("POST /api/state")
@@ -394,7 +439,7 @@ def update_state(body: StateUpdateRequest):
 
 @router.post("/api/ingest")
 async def ingest_sources(
-    files: list[UploadFile] = File(default=[]),
+    files: list[UploadFile | str] = File(default=[]),
     types: list[str] = Form(default=[]),
     prd_file: UploadFile | None = File(default=None),
 ):
@@ -410,7 +455,13 @@ async def ingest_sources(
     data_inputs: list[RawInput] = []
     prd_loaded = False
 
-    for idx, uf in enumerate(files):
+    uploaded_files = [
+        (idx, uf)
+        for idx, uf in enumerate(files)
+        if hasattr(uf, "filename") and hasattr(uf, "read")
+    ]
+
+    for idx, uf in uploaded_files:
         filename = uf.filename or f"file_{idx}"
         source_type = types[idx].lower() if idx < len(types) and types[idx] else None
         raw_bytes = await uf.read()
@@ -418,6 +469,7 @@ async def ingest_sources(
             if source_type == "prd":
                 ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
                 state.raw_prd_content = ri.content
+                state.raw_prd_metadata = {**ri.metadata, "filename": filename}
                 prd_loaded = True
                 sources.append({"source_type": "prd", "filename": filename,
                                 "rows_in": 0, "rows_after_dedup": 0, "status": "ok"})
@@ -441,11 +493,14 @@ async def ingest_sources(
             raw_bytes = await prd_file.read()
             ri = PRDLoader(io.BytesIO(raw_bytes), filename).load()
             state.raw_prd_content = ri.content
+            state.raw_prd_metadata = {**ri.metadata, "filename": filename}
             prd_loaded = True
             sources.append({"source_type": "prd", "filename": filename,
                             "rows_in": 0, "rows_after_dedup": 0, "status": "ok"})
         except Exception as e:
             logger.warning("Ingest PRD skip %s: %s", filename, e)
+            sources.append({"source_type": "prd", "filename": filename,
+                            "rows_in": 0, "rows_after_dedup": 0, "status": "skipped"})
             warnings.append(f"{filename}: {e} → skip")
 
     if data_inputs:
@@ -456,7 +511,10 @@ async def ingest_sources(
         total_chars = len(state.raw_prd_content)
 
     if not data_inputs and not prd_loaded:
-        raise HTTPException(400, "Không có file hợp lệ nào được nạp (tất cả skip).")
+        detail = "Không có file hợp lệ nào được nạp."
+        if warnings:
+            detail = f"{detail} {' | '.join(warnings)}"
+        raise HTTPException(400, detail)
 
     return {
         "sources": sources,

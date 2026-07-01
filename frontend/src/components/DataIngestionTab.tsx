@@ -201,7 +201,7 @@ export default function DataIngestionTab({
   // ---- Ingest handlers ----
   const inferSourceType = (name: string): string => {
     const lower = name.toLowerCase();
-    if (lower.endsWith(".md") || lower.endsWith(".txt")) return "text";
+    if (lower.endsWith(".md") || lower.endsWith(".txt") || lower.endsWith(".pdf")) return "text";
     return "survey";
   };
 
@@ -263,7 +263,9 @@ export default function DataIngestionTab({
 
   // Run Intent Discovery from uploaded/pasted sources and/or persisted social crawl data.
   const handleSubmit = async () => {
-    const hasFiles = stagedFiles.length > 0 || prdFile;
+    const ingestDataFiles = discoveryScope !== "prd" ? stagedFiles : [];
+    const ingestPrdFile = discoveryScope !== "data" ? prdFile : null;
+    const hasPendingIngest = ingestDataFiles.length > 0 || !!ingestPrdFile;
     const hasCrawledData = crawledPosts.length > 0;
     const hasDataSource = stagedFiles.length > 0 || logsText.trim().length > 0 || hasCrawledData;
 
@@ -284,8 +286,8 @@ export default function DataIngestionTab({
     setLoading(true);
     try {
       // Server-side ingest (FormData) for files + PRD; paste-text goes straight to discover.
-      if (hasFiles) {
-        const ingestStats = await onIngest(stagedFiles, prdFile);
+      if (hasPendingIngest) {
+        const ingestStats = await onIngest(ingestDataFiles, ingestPrdFile);
         setStats(ingestStats);
         // logsText (paste) takes precedence; else "" → backend uses ingested state.
         await onDiscover(logsText.trim(), ruleText, discoveryScope);
@@ -447,8 +449,8 @@ export default function DataIngestionTab({
           </div>
 
           {/* Hidden file inputs (shared) */}
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,.xlsx,.json,.jsonl,.md,.txt" multiple className="hidden" />
-          <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,.xlsx,.json,.jsonl,.md,.txt,.pdf" multiple className="hidden" />
+          <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt,.pdf" className="hidden" />
 
           {/* TOP TIER — PRD | Social Crawl, equal weight, the two primary intent sources */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-0">
@@ -479,7 +481,7 @@ export default function DataIngestionTab({
               >
                 <span className={`material-symbols-outlined text-[40px] mb-2 transition-colors ${isPrdDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>upload_file</span>
                 <p className="text-[13px] uppercase tracking-wider font-bold text-stone-700 text-center">Drag & drop PRD here</p>
-                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">or click to upload · .md, .txt</p>
+                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">or click to upload · .md, .txt, .pdf</p>
               </div>
 
               {/* PRD status */}
@@ -520,7 +522,7 @@ export default function DataIngestionTab({
                   }`}
                 >
                   <span className={`material-symbols-outlined text-[20px] transition-colors ${isDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>cloud_upload</span>
-                  <p className="text-[11px] uppercase tracking-wider font-bold text-stone-600">+ Add files (.csv, .xlsx, .json, .md, .txt)</p>
+                  <p className="text-[11px] uppercase tracking-wider font-bold text-stone-600">+ Add files (.csv, .xlsx, .json, .md, .txt, .pdf)</p>
                 </div>
 
                 {stagedFiles.length > 0 && (
