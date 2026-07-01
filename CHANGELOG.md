@@ -47,9 +47,15 @@ Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đ
 - **OperationConsole sang theme sáng** (nền trắng, chữ stone, màu nhãn đậm hơn -400 → -600) + **thanh progress indeterminate** trượt liên tục thay cho thanh % (vì không biết trước thời lượng async op).
   `frontend/src/components/OperationConsole.tsx`, `frontend/src/index.css`
 
+### Added — Tính năng mới
+- **Hỗ trợ PRD dạng PDF**: thêm trích text PDF bằng `pypdf` trong `PRDLoader` (nhánh `.pdf` riêng; PDF scan/ảnh không có text → báo lỗi rõ để chuyển sang .md/.txt). Cho phép `.pdf` ở ô upload PRD (`accept` + nhãn). Trước đây upload PDF bị decode như văn bản → ra rác nhị phân → **discover intents fail**.
+  `backend/src/ingestion/prd_loader.py`, `frontend/src/components/DataIngestionTab.tsx` · (cài `pypdf` vào `.venv`)
+
 ### Fixed — Sửa lỗi
 - **PRD (và file/crawl/text đã nhập) bị mất khi chuyển tab rồi quay lại**: Data Ingestion trước đây render theo điều kiện `currentStep === 1` → **unmount khi rời tab**, xoá state cục bộ (PRD upload nhưng chưa ingest, staged files, stats, kết quả crawl, text dán). Nay **giữ tab luôn mounted, chỉ ẩn bằng CSS** khi off-tab → state sống qua các lần chuyển tab.
   `frontend/src/App.tsx`
+- **Trạng thái PRD hiển thị nhầm ở khu vực "Documents & Raw Text"**: khối tóm tắt ingest liệt kê cả PRD (dòng `prd ...: 0` + "PRD loaded") ngay trong mục Documents, dù PRD đã có ô status riêng. Nay **lọc PRD khỏi khối Documents** (chỉ hiện source non-PRD, ẩn hẳn nếu không có), và đưa số chars của PRD vào chính **ô PRD** ("PRD loaded · N chars", chỉ khi PRD là nguồn duy nhất để không gán nhầm chars của document/text).
+  `frontend/src/components/DataIngestionTab.tsx`
 
 ## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Keyword coverage
 
