@@ -25,6 +25,8 @@ Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đ
 ### Changed — Thay đổi
 - **Prompt sinh persona ép tiếng Việt**: thêm mục `# LANGUAGE (mandatory)` + dịch toàn bộ ví dụ R0–R4 sang tiếng Việt, để output (`trigger`/`utterance`/`pain`/`reject`/...) luôn là tiếng Việt tự nhiên — `utterance` như người thật gõ (viết tắt, không dấu); key JSON giữ tiếng Anh.
   `backend/src/prompts/persona_generator_system.txt`
+- **Chỉ dẫn / cảnh báo / thông báo không pass hiển thị bằng tiếng Việt**: ép evaluator xuất `fixes` và `persona_issues` bằng tiếng Việt (thêm `# LANGUAGE (mandatory)` + dịch ví dụ few-shot; giữ code tiêu chí P1–P5/R0/G1–G4, verdict, JSON key bằng tiếng Anh). Dịch nốt toast `warning` của endpoint và thông báo mặc định "chưa sinh được persona" sang tiếng Việt có dấu.
+  `backend/src/prompts/persona_evaluator_system.txt`, `backend/src/api/routers/frontend_api.py`, `backend/src/pipeline/persona_graph.py`
 
 ### Notes — Ghi chú
 - Nguyên nhân nền khiến JSON dễ bị cắt là `max_tokens=4096` (`anthropic_client.py`, `openrouter_client.py`); hai fix trên giúp **không mất dữ liệu** khi điều này xảy ra. Cân nhắc nâng `max_tokens` (vd 8192) để LLM sinh đủ ngay từ đầu — chưa thực hiện vì ảnh hưởng chi phí/độ trễ.
@@ -44,6 +46,10 @@ Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đ
   `frontend/src/components/IntentCurationTab.tsx`, `frontend/src/App.tsx`
 - **OperationConsole sang theme sáng** (nền trắng, chữ stone, màu nhãn đậm hơn -400 → -600) + **thanh progress indeterminate** trượt liên tục thay cho thanh % (vì không biết trước thời lượng async op).
   `frontend/src/components/OperationConsole.tsx`, `frontend/src/index.css`
+
+### Fixed — Sửa lỗi
+- **PRD (và file/crawl/text đã nhập) bị mất khi chuyển tab rồi quay lại**: Data Ingestion trước đây render theo điều kiện `currentStep === 1` → **unmount khi rời tab**, xoá state cục bộ (PRD upload nhưng chưa ingest, staged files, stats, kết quả crawl, text dán). Nay **giữ tab luôn mounted, chỉ ẩn bằng CSS** khi off-tab → state sống qua các lần chuyển tab.
+  `frontend/src/App.tsx`
 
 ## [Chưa phát hành] — 2026-06-30 (nhánh `feat/intent-merge-cite`) — Keyword coverage
 

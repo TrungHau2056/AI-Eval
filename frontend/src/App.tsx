@@ -624,7 +624,10 @@ export default function App() {
 
           {/* Active Tab View Frame */}
           <main className="mt-2">
-            {currentStep === 1 && (
+            {/* Kept mounted (hidden when off-tab) so its local state — uploaded PRD, staged
+                files, ingest stats, crawl results, pasted text — survives tab switches.
+                Conditionally unmounting here wiped an uploaded-but-not-yet-ingested PRD. */}
+            <div className={currentStep === 1 ? "" : "hidden"}>
               <DataIngestionTab
                 onDiscover={handleDiscover}
                 onIngest={handleIngest}
@@ -641,7 +644,7 @@ export default function App() {
                   setIsRuleModalOpen(true);
                 }}
               />
-            )}
+            </div>
 
             {currentStep === 2 && (
               <IntentCurationTab

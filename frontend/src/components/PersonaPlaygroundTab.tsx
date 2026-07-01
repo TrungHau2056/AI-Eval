@@ -312,14 +312,14 @@ export default function PersonaPlaygroundTab({
             <button
               type="button"
               onClick={() => setShowIntentDropdown(!showIntentDropdown)}
-              className="min-w-[260px] bg-white border border-stone-200 hover:border-stone-300 px-4 py-2.5 flex items-center justify-between gap-3 text-left cursor-pointer transition-all"
+              className="w-[240px] bg-white border border-stone-200 hover:border-stone-300 px-4 py-2.5 flex items-center justify-between gap-3 text-left cursor-pointer transition-all"
             >
-              <span className="flex items-center gap-2 text-[12px] font-semibold text-stone-800 tracking-wider truncate">
+              <span className="flex items-center gap-2 text-[12px] font-semibold text-stone-800 tracking-wider min-w-0">
                 {selectedIntentIssue && (
                   <span className="material-symbols-outlined text-[15px] text-amber-500 shrink-0">warning</span>
                 )}
                 <span className="truncate">
-                  {selectedIntent ? `[${selectedIntent.phase}] ${selectedIntent.name}` : "Select intent..."}
+                  {selectedIntent ? selectedIntent.name : "Select intent..."}
                 </span>
               </span>
               <span className="material-symbols-outlined text-[18px] text-stone-400 shrink-0">
@@ -328,7 +328,7 @@ export default function PersonaPlaygroundTab({
             </button>
 
             {showIntentDropdown && (
-              <div className="absolute top-[100%] right-0 z-50 mt-1 w-[340px] bg-white border border-stone-200 shadow-lg max-h-[320px] overflow-y-auto custom-scrollbar">
+              <div className="absolute top-[100%] right-0 z-50 mt-1 w-[240px] bg-white border border-stone-200 shadow-lg max-h-[320px] overflow-y-auto custom-scrollbar">
                 <div className="p-1">
                   {displayIntents.map((intent) => {
                     const issue = personaIssues[intent.id];
@@ -350,7 +350,7 @@ export default function PersonaPlaygroundTab({
                             <span className="material-symbols-outlined text-[14px] text-amber-500 shrink-0">warning</span>
                           )}
                           <span className="text-[11px] font-bold tracking-wider truncate">
-                            [{intent.phase}] {intent.name}
+                            {intent.name}
                           </span>
                         </span>
                         <span className="flex items-center gap-2 shrink-0">
