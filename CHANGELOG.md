@@ -13,6 +13,8 @@ Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đ
   `frontend/src/components/PersonaPlaygroundTab.tsx`, `frontend/src/types.ts` (thêm interface `PersonaIssue`), `frontend/src/App.tsx` (state `personaIssues`, toast `warning`)
 
 ### Fixed — Sửa lỗi
+- **Sinh persona cho TẤT CẢ intent thay vì chỉ intent đã chọn** (chọn 3 intent nhưng sinh 12 persona cho 6 intent, rồi FE lọc hiện 6): endpoint ưu tiên `state.internal_intents` (toàn bộ intent đã discover) và bỏ qua danh sách intent đã chọn mà FE gửi lên. Nay **lọc `internal_intents` theo id FE gửi** → chọn N intent sinh đúng 2N persona, khớp checkbox, khỏi lãng phí token.
+  `backend/src/api/routers/frontend_api.py`
 - **REFINE làm rớt persona (intent về 0 persona)**: bước REFINE trước đây **xoá cặp cũ trước khi sinh lại**; nếu LLM trả JSON bị cắt/hỏng (`_parse → []`) thì không có gì thay thế → intent mất sạch persona (vi phạm rule "đúng 2 persona/intent"). Đổi sang **merge không phá hủy**: chỉ xoá cặp cũ khi cặp mới parse thành công, ngược lại giữ nguyên bản trước đó.
   `backend/src/pipeline/persona_graph.py`
 - **Intent thiếu persona không bị bắt**: `_apply_best_attempts` giờ phát hiện lỗi **theo cấu trúc** — đếm số persona/intent ở kết quả cuối; intent nào < 2 persona (hoặc còn trong `pairs_to_regenerate`) đều bị flag, kể cả khi evaluator không hề "thấy" nó nên không bao giờ đưa vào `pairs_to_regenerate`.
@@ -34,6 +36,8 @@ Khi vòng lặp generate→evaluate→refine không tạo nổi cặp persona đ
   `frontend/src/App.tsx`, `frontend/src/components/DataIngestionTab.tsx`
 
 ### Changed — Thay đổi
+- **Chống spam click nút "Process Selected"** (Intent Curation): nút bị **grey out + hiện spinner "Processing..."** trong lúc sinh persona (`processing = activeOp === "personas"`), tránh người dùng bấm liên tục tạo nhiều request. Các nút chạy lâu khác (Run Intent Discovery, Crawl, Confirm Personas, Regenerate) vốn đã tự disable khi chạy.
+  `frontend/src/components/IntentCurationTab.tsx`, `frontend/src/App.tsx`
 - **Bố cục Data Ingestion**: nút "Crawl Social Data" + "View Results" dời vào trong cột Social Crawl (dùng `mt-auto` đẩy xuống đáy); "Run Intent Discovery" thành nút chính **căn giữa**, chạy trên toàn bộ nguồn trong scope, kèm dòng helper làm rõ phạm vi.
   `frontend/src/components/DataIngestionTab.tsx`
 - **Select-all ở Intent Curation chỉ áp cho tab đang xem** (`visibleIntents`), không chọn nhầm intent ở tab khác. `onToggleSelectAll` đổi chữ ký nhận `ids[]`.

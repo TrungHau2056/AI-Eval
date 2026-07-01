@@ -654,6 +654,19 @@ def generate_personas(req: GeneratePersonasRequest):
     # Use internal intents if available (from discover), otherwise map from FE intents
     if state.internal_intents:
         internal_intents = state.internal_intents
+        # Respect the user's selection: the FE sends only the intents the user checked.
+        # Without this filter we'd build personas for EVERY discovered intent (e.g. 6 -> 12
+        # personas) and the FE would silently hide the ones not selected — wasting tokens
+        # and showing a misleading count. Match by id (internal_intents[].id == FE intent id).
+        selected_ids = {i.get("id") for i in req.intents if i.get("id")}
+        if selected_ids:
+            filtered = [i for i in internal_intents if i.id in selected_ids]
+            if filtered:
+                internal_intents = filtered
+        logger.info(
+            "generate_personas | selected_ids=%d | internal_intents used=%d (of %d discovered)",
+            len(selected_ids), len(internal_intents), len(state.internal_intents),
+        )
     elif req.intents:
         internal_intents = []
         for i in req.intents:

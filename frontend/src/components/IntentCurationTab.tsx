@@ -9,6 +9,8 @@ interface IntentCurationTabProps {
   onToggleSelectAll: (ids: string[], checked: boolean) => void;
   onAddIntent: () => void;
   onProcessIntents: () => void;
+  /** True while persona generation is running — disables the Process button to block spam clicks. */
+  processing?: boolean;
   ruleText: string;
   onOpenRuleModal: () => void;
   onToast?: (message: string, type: "success" | "info" | "error") => void;
@@ -20,6 +22,7 @@ export default function IntentCurationTab({
   onToggleSelectAll,
   onAddIntent,
   onProcessIntents,
+  processing,
   ruleText,
   onOpenRuleModal,
   onToast,
@@ -209,10 +212,17 @@ export default function IntentCurationTab({
             </button>
             <button
               onClick={onProcessIntents}
-              disabled={selectedCount === 0}
+              disabled={selectedCount === 0 || processing}
               className="flex items-center gap-2 px-6 py-2 bg-[#ff4d00] text-white rounded-none font-bold text-[11px] uppercase tracking-wider hover:opacity-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
-              Process Selected ({selectedCount})
+              {processing ? (
+                <>
+                  <span className="material-symbols-outlined text-[15px] animate-spin">sync</span>
+                  Processing...
+                </>
+              ) : (
+                <>Process Selected ({selectedCount})</>
+              )}
             </button>
           </div>
           </div>

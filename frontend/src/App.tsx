@@ -650,6 +650,7 @@ export default function App() {
                 onToggleSelectAll={handleToggleSelectAllIntents}
                 onAddIntent={handleAddIntent}
                 onProcessIntents={handleProcessIntents}
+                processing={activeOp === "personas"}
                 ruleText={personaRule}
                 onToast={showToast}
                 onOpenRuleModal={() => {
