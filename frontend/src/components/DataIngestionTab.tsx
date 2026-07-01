@@ -95,9 +95,6 @@ const PRESET_DOMAINS = [
   }
 ];
 
-// Custom (non-preset) domain default keywords: 5 core selected + 5 extra suggestions.
-const CUSTOM_DOMAIN_TAGS = ["#hỗ_trợ", "#góp_ý", "#đánh_giá", "#hoàn_tiền", "#sự_cố", "#lừa_đảo", "#giá_cả", "#review", "#khuyến_mãi", "#tư_vấn"];
-
 export default function DataIngestionTab({
   onDiscover,
   onIngest,
@@ -194,9 +191,10 @@ export default function DataIngestionTab({
         setNewKeywordInput(found.tags.slice(0, CORE_KEYWORD_COUNT).join(", "));
       }
     } else {
-      setNewKeywordInput(CUSTOM_DOMAIN_TAGS.slice(0, CORE_KEYWORD_COUNT).join(", "));
+      // Custom domain: keyword follows the domain name the user enters.
+      setNewKeywordInput(customDomainLabel.trim());
     }
-  }, [selectedDomainId, isCustomDomain]);
+  }, [selectedDomainId, isCustomDomain, customDomainLabel]);
 
   // ---- Ingest handlers ----
   const inferSourceType = (name: string): string => {
@@ -356,9 +354,9 @@ export default function DataIngestionTab({
 
   // Suggested hashtags based on current domain — shows the full 10-keyword pool
   // (the pre-selected core ones appear highlighted because they're already in the input).
-  const getRecommendedTags = () => {
+  const getRecommendedTags = (): string[] => {
     if (isCustomDomain) {
-      return CUSTOM_DOMAIN_TAGS;
+      return [];
     }
     const found = PRESET_DOMAINS.find((d) => d.id === selectedDomainId);
     return found ? found.tags : ["#phản_hồi", "#hỗ_trợ"];
@@ -406,7 +404,8 @@ export default function DataIngestionTab({
         setNewKeywordInput(found.tags.slice(0, CORE_KEYWORD_COUNT).join(", "));
       }
     } else {
-      setNewKeywordInput(CUSTOM_DOMAIN_TAGS.slice(0, CORE_KEYWORD_COUNT).join(", "));
+      // Custom domain: reset keyword back to the entered domain name.
+      setNewKeywordInput(customDomainLabel.trim());
     }
   };
 
@@ -780,7 +779,8 @@ export default function DataIngestionTab({
                         </button>
                       </form>
 
-                      {/* Suggested hashtags — click to select/deselect */}
+                      {/* Suggested hashtags — click to select/deselect (hidden for custom domains, which have no suggestions) */}
+                      {getRecommendedTags().length > 0 && (
                       <div className="mt-1 pb-0.5">
                         <span className="text-[9px] font-mono text-stone-400 font-bold uppercase tracking-wider block mb-1.5">
                           Suggested (click to select/deselect):
@@ -806,6 +806,7 @@ export default function DataIngestionTab({
                           })}
                         </div>
                       </div>
+                      )}
                     </div>
                   </div>
                 )}
