@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # LLM model ids (cấu hình được qua .env)
     gemini_model: str = "gemini-2.5-flash"
     openai_model: str = "gpt-4o-mini"
+    openai_pricing_json: str = "{}"
+
+    # Persona generation loop
+    persona_max_iterations: int = 2
+    persona_pass_threshold: float = 0.75
 
     # Gap analysis / IntentComparator
     embedding_model: str = "models/gemini-embedding-001"
@@ -31,7 +36,7 @@ class Settings(BaseSettings):
     # Apify (social-media crawl)
     apify_token: str = ""
 
-    model_config = {"env_file": ENV_FILES, "env_prefix": ""}
+    model_config = {"env_file": ENV_FILES, "env_prefix": "", "extra": "ignore"}
 
 
 settings = Settings()

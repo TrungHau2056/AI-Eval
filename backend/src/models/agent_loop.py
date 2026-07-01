@@ -20,6 +20,8 @@ import json
 import logging
 from typing import Callable
 
+from src.config import settings
+
 from ..llm.base import PersonaAgentLLMBase
 from ..schemas.models import (
     AgentLoopResult,
@@ -48,18 +50,18 @@ class PersonaAgentLoop:
     Agent loop sinh và cải thiện persona theo rubric.
 
     Usage:
-        loop = PersonaAgentLoop(llm=client, max_iterations=5)
+        loop = PersonaAgentLoop(llm=client)
         result = await loop.run(intent, rubric)
     """
 
     def __init__(
         self,
         llm: PersonaAgentLLMBase,
-        max_iterations: int = 5,
+        max_iterations: int | None = None,
         on_progress: Callable[[str], None] | None = None,
     ):
         self.llm = llm
-        self.max_iterations = max_iterations
+        self.max_iterations = max_iterations if max_iterations is not None else settings.persona_max_iterations
         self.on_progress = on_progress or (lambda msg: None)
 
     # ------------------------------------------------------------------
