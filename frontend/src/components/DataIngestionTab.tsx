@@ -124,6 +124,11 @@ export default function DataIngestionTab({
   const [discoveryScope, setDiscoveryScope] = useState<"data" | "prd" | "both">("data");
   // PRD is available if one was just uploaded locally, ingested, or already in backend state.
   const prdAvailable = !!prdFile || !!stats?.prd_loaded || !!prdLoaded;
+  // Ingest summary belongs with its own source. PRD has a dedicated status box, so keep PRD
+  // out of the "Documents & Raw Text" stats and surface its size in the PRD box instead.
+  // total_chars is an aggregate → only equals the PRD's own size when PRD is the sole source.
+  const nonPrdSources = stats ? stats.sources.filter((s) => s.source_type !== "prd") : [];
+  const prdChars = stats?.prd_loaded && nonPrdSources.length === 0 ? stats.total_chars : null;
 
   // ---- Social Trend Explorer ----
   const [socialLoading, setSocialLoading] = useState(false);
@@ -448,7 +453,7 @@ export default function DataIngestionTab({
 
           {/* Hidden file inputs (shared) */}
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,.xlsx,.json,.jsonl,.md,.txt" multiple className="hidden" />
-          <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt" className="hidden" />
+          <input type="file" ref={prdInputRef} onChange={handlePrdChange} accept=".md,.txt,.pdf" className="hidden" />
 
           {/* TOP TIER — PRD | Social Crawl, equal weight, the two primary intent sources */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-0">
@@ -479,7 +484,7 @@ export default function DataIngestionTab({
               >
                 <span className={`material-symbols-outlined text-[40px] mb-2 transition-colors ${isPrdDragging ? "text-[#ff4d00]" : "text-stone-400 group-hover:text-[#ff4d00]"}`}>upload_file</span>
                 <p className="text-[13px] uppercase tracking-wider font-bold text-stone-700 text-center">Drag & drop PRD here</p>
-                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">or click to upload · .md, .txt</p>
+                <p className="text-[11px] text-stone-400 font-serif italic mt-1 text-center">or click to upload · .md, .txt, .pdf</p>
               </div>
 
               {/* PRD status */}
@@ -488,12 +493,13 @@ export default function DataIngestionTab({
                   <span className="text-[11px] font-mono text-stone-600 flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-[14px] text-emerald-500">check_circle</span>
                     {prdFile.name}
+                    {prdChars !== null && <span className="text-emerald-600">· PRD loaded · {prdChars} chars</span>}
                     <button onClick={() => setPrdFile(null)} className="ml-1 text-[#ff4d00] hover:underline bg-transparent border-0 cursor-pointer uppercase text-[10px] font-bold">clear</button>
                   </span>
                 ) : prdAvailable ? (
                   <span className="text-[11px] font-mono text-emerald-600 flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                    PRD loaded
+                    PRD loaded{prdChars !== null ? ` · ${prdChars} chars` : ""}
                   </span>
                 ) : (
                   <span className="text-[11px] font-mono text-stone-400 italic">No PRD loaded</span>
@@ -547,16 +553,16 @@ export default function DataIngestionTab({
                   </div>
                 )}
 
-                {stats && (
+                {/* Document/data ingest summary only — PRD is reported in its own status box above. */}
+                {nonPrdSources.length > 0 && (
                   <div className="border border-stone-200 bg-white px-3 py-2">
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] font-mono text-stone-700">
-                      {stats.sources.map((s, i) => (
+                      {nonPrdSources.map((s, i) => (
                         <span key={i} className={s.status === "skipped" ? "text-rose-600" : ""}>
                           {s.source_type} {s.filename}: {s.rows_in}{s.status === "skipped" ? " skip" : ""}
                         </span>
                       ))}
-                      {stats.prd_loaded && <span className="text-[#ff4d00]">PRD loaded</span>}
-                      <span>· {stats.total_chars} chars</span>
+                      <span>· {stats!.total_chars} chars</span>
                     </div>
                   </div>
                 )}
