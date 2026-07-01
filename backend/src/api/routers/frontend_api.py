@@ -807,8 +807,8 @@ def generate_personas(req: GeneratePersonasRequest):
     warning = None
     if short_names:
         warning = (
-            f"{len(short_names)} intent(s) couldn't be fully completed after retries: "
-            f"{', '.join(short_names)}. Showing the best attempt for each — try again or adjust the intent."
+            f"{len(short_names)} intent chưa đạt rubric sau nhiều vòng thử: "
+            f"{', '.join(short_names)}. Đang hiển thị bản tốt nhất cho mỗi intent — hãy generate lại hoặc chỉnh lại câu intent."
         )
         logger.warning("Persona generation incomplete | %s", warning)
 

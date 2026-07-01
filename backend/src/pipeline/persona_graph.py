@@ -822,7 +822,7 @@ class PersonaGenerationGraph:
                     "score": 0,
                     "max_score": PAIR_MAX_SCORE,
                     "fixes": [],
-                    "issues": ["AI khong sinh duoc persona hop le cho intent nay sau nhieu lan thu."],
+                    "issues": ["AI chưa sinh được persona hợp lệ cho intent này sau nhiều lần thử. Hãy thử chỉnh lại câu intent cho rõ ràng, cụ thể hơn rồi generate lại."],
                     "iteration": final_state.get("iteration", 0),
                 })
 
